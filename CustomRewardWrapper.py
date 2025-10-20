@@ -28,15 +28,16 @@ class CustomRewardWrapper(gym.Wrapper):
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
+        info_tensors = {}
         for key, value in info.items():
             if isinstance(value, np.ndarray):
-                info[key] = torch.as_tensor(value, dtype=torch.float32)
+                info_tensors[key] = torch.as_tensor(value, dtype=torch.float32)
             elif isinstance(value, (int, float)):
-                info[key] = torch.tensor(value, dtype=torch.float32)
+                info_tensors[key] = torch.tensor(value, dtype=torch.float32)
 
         # Calculate new reward
         new_reward_tuple = self.custom_reward_fn(
-            observation, action, original_reward, terminated, truncated, info
+            observation, action_tensor, original_reward, terminated, truncated, info_tensors
         )
         new_reward = new_reward_tuple[0]
 
