@@ -1,0 +1,27 @@
+```python
+import torch
+from typing import Dict, Tuple
+
+@torch.jit.script
+def compute_reward(object_pos: torch.Tensor, goal_pos: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    # Assumes 1D tensors where index 0 corresponds to the x-position
+    device = object_pos.device
+
+    x_pos = object_pos[0]
+    goal_x = goal_pos[0]
+
+    distance = torch.abs(goal_x - x_pos)
+
+    # Temperature parameter for the transformation (not an input)
+    proximity_temp = torch.tensor(0.8, device=device)
+    proximity_reward = torch.exp(-distance / proximity_temp)
+
+    reward = proximity_reward
+
+    components = {}
+    components["proximity_reward"] = proximity_reward
+    components["distance"] = distance
+    components["raw_negative_distance"] = -distance
+
+    return reward, components
+```

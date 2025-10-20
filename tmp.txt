@@ -1,0 +1,77 @@
+def call_gpt_model(prompt: str) -> str:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise Exception("Error: The OPENAI_API_KEY environment variable is not set.")
+    try:
+        # OpenAI client uses  OPENAI_API_KEY environment variable by default.
+        client = openai.OpenAI()
+
+        response = client.chat.completions.create(
+            model="gpt-5-nano-2025-08-07",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
+
+        if response.choices and response.choices[0].message and response.choices[0].message.content:
+            return response.choices[0].message.content.strip()
+        else:
+            return "Error: API response was empty or invalid."
+
+    except openai.NotFoundError as e:
+        return f"An error occurred: The model does not exist. Please use a valid model name. Details: {e}"
+    except Exception as e:
+        return f"An unexpected error occurred: {e}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def parse_all_code_blocks(text_blob: str) -> List[Callable[..., Any]]:
+    code_blocks = re.findall(r"```(.*?)```", text_blob, re.DOTALL)
+    print("code block: " + str(code_blocks))
+
+    callable_functions = []
+
+    name_pattern = re.compile(r"def\s+([a-zA-Z_]\w*)")
+
+    for i, code in enumerate(code_blocks):
+        code = code.strip()
+        if not code:
+            continue
+
+        match = name_pattern.search(code)
+        if not match:
+            print(f"Info: Block {i + 1} does not contain a Python function definition. Skipping.")
+            continue
+
+        try:
+            function_name = match.group(1)
+
+            local_namespace = {}
+            global_namespace = {}
+
+            exec(code, global_namespace, local_namespace)
+
+            if function_name in local_namespace and callable(local_namespace[function_name]):
+                func_object = local_namespace[function_name]
+                callable_functions.append(func_object)
+            else:
+                print(f"Warning: Executed block {i + 1}, but couldn't find callable function '{function_name}'.")
+
+        except Exception as e:
+            print(f"Error parsing or creating function from block {i + 1}: {e}")
+
+    return callable_functions
