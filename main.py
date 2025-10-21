@@ -3,7 +3,7 @@ from placeholders import return_reward_string_placeholder as llm_placeholder, re
 from utils import (parse_all_code_blocks, ChatSession, save_string_to_file, load_string_from_file,
                    parse_and_validate_code_blocks)
 from prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1, rew_reflection_2, walker_2d_v4_description,
-                     pre_env, reward_func_context, )
+                     pre_env, reward_func_context, num_rew_funcs_directive)
 from environment_code import walker_2d_v4_code
 from CustomRewardWrapper import RewardFunctionWrapper
 
@@ -11,20 +11,24 @@ from CustomRewardWrapper import RewardFunctionWrapper
 def reward_evolution(num_iterations=5):
     if num_iterations < 1:
         num_iterations = 1
-    gpt = ChatSession(model="gpt-5")  # -nano-2025-08-07
+    gpt = ChatSession(model="gpt-5-nano-2025-08-07")  # -nano-2025-08-07
     original_prompt = (
-            init_sys_prompt + "\n" + reward_func_context + "\n" + pre_env + "\n" + walker_2d_v4_code + "\n" + walker_2d_v4_description + "\n" +
-            code_formatting_tip)
+            init_sys_prompt + "\n" + reward_func_context + "\n" + pre_env + "\n" + walker_2d_v4_code + "\n" +
+            walker_2d_v4_description + "\n" + code_formatting_tip + "\n" + num_rew_funcs_directive)
     # print(original_prompt)
     reward_string = gpt.ask(original_prompt)
-    # reward_string = ""  # make sure we do not call gpt without meaning to!!!
+    print("\n\n\n")
     print(reward_string)
+    print("\n\n\n")
     reward_strings_list = parse_and_validate_code_blocks(reward_string)
+    print("\n\n\n")
+    print(reward_strings_list)
+    print("\n\n\n")
     reward_funcs = [RewardFunctionWrapper(reward_string) for reward_string in reward_strings_list]
 
-    save_string_to_file("example_reward.txt", reward_string)
-    #reward_string = load_string_from_file("example_reward.txt")
-    #reward_funcs = [RewardFunctionWrapper(reward_string)]  # for _ in range(16)
+    # save_string_to_file("example_reward.txt", reward_string)
+    # reward_string = load_string_from_file("example_reward.txt")
+    # reward_funcs = [RewardFunctionWrapper(reward_string)]  # for _ in range(16)
     assert len(reward_funcs) > 0
     fitness_scores = train_rllib_multi_policy(reward_list=reward_funcs, total_timesteps=16384)
     reflection_string = reflect(str(fitness_scores))
@@ -33,6 +37,10 @@ def reward_evolution(num_iterations=5):
         prompt = new_prompt + reflection_string
         # reward_string = llm_placeholder(prompt)
         # reward_funcs = parse_all_code_blocks(reward_string)
+        reward_string = gpt.ask(original_prompt)
+        reward_strings_list = parse_and_validate_code_blocks(reward_string)
+        reward_funcs = [RewardFunctionWrapper(reward_string) for reward_string in reward_strings_list]
+        assert len(reward_funcs) > 0
         fitness_scores = train_rllib_multi_policy(reward_list=reward_funcs, total_timesteps=16384)
         reflection_string = reflect(str(fitness_scores))
 

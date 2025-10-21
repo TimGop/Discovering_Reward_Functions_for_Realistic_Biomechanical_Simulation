@@ -123,13 +123,16 @@ def parse_all_code_blocks(text_blob: str) -> List[Callable[..., Any]]:
     return callable_functions
 
 
-def parse_and_validate_code_blocks(text_blob: str) -> List[str]:
+def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> List[str]:
     """
     Parses a text blob to find all Python code blocks, validates that each
     can be compiled by torch.jit.script, and returns a list of the valid
     code STRINGS.
     """
+    if required_imports is None:
+        required_imports = ["import torch", "from typing import Tuple"]
     patterns = [
+        r"'''python(.*?)'''",
         r'```python(.*?)```',
         r'```(.*?)```',
         r'"""(.*?)"""',
@@ -150,12 +153,19 @@ def parse_and_validate_code_blocks(text_blob: str) -> List[str]:
         try:
             # Attempt to compile the function here in the main process.
             # We don't keep the result; this is purely for validation.
+            # Prepend any required import statements
+            import_statements = ""
+            if required_imports:
+                import_statements = "\n".join([f"{lib}" for lib in required_imports]) + "\n\n"
+
+            full_code = import_statements + code_str
+
             print(f"Validating block {i + 1}...")
-            compile_func_from_string(code_str)
+            compile_func_from_string(full_code)
 
             # If the line above doesn't raise an error, the code is valid.
             print(f"Block {i + 1} is valid.")
-            valid_code_strings.append(code_str)
+            valid_code_strings.append(full_code)
 
         except Exception as e:
             # If compilation fails, report the error and skip this function.

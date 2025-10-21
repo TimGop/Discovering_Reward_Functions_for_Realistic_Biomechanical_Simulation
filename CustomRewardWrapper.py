@@ -28,23 +28,13 @@ class CustomRewardWrapper(gym.Wrapper):
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
-        info_tensors = {}
-        for key, value in info.items():
-            if isinstance(value, np.ndarray):
-                info_tensors[key] = torch.as_tensor(value, dtype=torch.float32)
-            elif isinstance(value, (int, float)):
-                info_tensors[key] = torch.tensor(value, dtype=torch.float32)
-
         # Calculate new reward
         new_reward_tuple = self.custom_reward_fn(
-            observation, action_tensor, original_reward, terminated, truncated, info_tensors
+            observation, action_tensor, original_reward, terminated, truncated
         )
         new_reward = new_reward_tuple[0]
 
-        # KEY CHANGE: Attach the policy ID to the info dictionary
         info["custom_policy_id"] = self.policy_id
-
-        # print("new_reward"+str(new_reward))
 
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info
 
@@ -125,11 +115,8 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
         return obs, rewards, terminated, truncated, info
 
 
-def compile_func_from_string(code_string: str) -> callable:
-    """
-    Takes a string containing a Python function and returns the compiled, callable object.
-    This is our validation and on-worker compilation engine.
-    """
+def compile_func_from_string(
+    code_string: str) -> callable:
     name_pattern = re.compile(r"def\s+([a-zA-Z_]\w*)")
     match = name_pattern.search(code_string)
     if not match:
