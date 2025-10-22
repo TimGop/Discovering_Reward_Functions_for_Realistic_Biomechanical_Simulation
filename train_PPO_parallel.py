@@ -1,7 +1,7 @@
 import ray
 from ray.rllib.algorithms.ppo import PPOConfig
 from CustomRewardWrapper import CustomMultiPolicyWalker  # Assuming this file exists
-from fitness_funcs_and_placeholder_reward_funcs import calculate_fitness_walker2d, walker2d_less_speed
+from fitness_funcs_and_placeholder_reward_funcs import calculate_fitness_walker2d
 import gymnasium as gym
 import warnings
 
@@ -129,13 +129,3 @@ def train_rllib_multi_policy(
     algo.stop()
     ray.shutdown()
     return max_fitness
-
-
-if __name__ == '__main__':
-    # for testing purposes
-    reward_fn_list = [walker2d_less_speed for _ in range(4)]
-    fitness_per_rew_func = train_rllib_multi_policy(
-        reward_list=reward_fn_list,
-        total_timesteps=3_000_000
-    )
-    print(fitness_per_rew_func)

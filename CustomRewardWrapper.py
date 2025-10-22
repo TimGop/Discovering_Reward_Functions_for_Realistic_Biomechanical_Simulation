@@ -1,7 +1,6 @@
 import gymnasium as gym
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from typing import Callable, Dict, Tuple
-import numpy as np
 import re
 import torch
 import tempfile

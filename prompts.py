@@ -6,13 +6,14 @@ Your reward function should use useful variables from the environment as inputs.
 the reward function signature can be:
 ‘‘‘
 @torch.jit.script
-def custom_reward_fn(observation, action, original_reward, terminated, truncated, info)
+def custom_reward_fn(observation, action, original_reward, terminated, truncated)
  -> Tuple[torch.Tensor,Dict[str, torch.Tensor]]:
 ...
 return reward, {}‘‘‘
 Since the reward function will be decorated with @torch.jit.script,
 please make sure that the code is compatible with TorchScript (e.g., use torch tensor instead
-of numpy array).
+of numpy array). Crucially, you must add explicit type hints to any empty dictionaries or lists.
+For example: info: Dict[str, torch.Tensor] = {}.
 Make sure any new tensor or variable you introduce is on the same device as the input tensors."""
 reward_func_context = """Note that the reward function will be called in the following context in a wrapper class that 
 overrides the original step method of an environment to implement its own custom reward function:
@@ -48,6 +49,13 @@ variable should not be specified as torch.Tensor
 the provided environment class definition (namely, variables that have prefix self.).
 Under no circumstance can you introduce new input variables.
 """
+code_formatting_tip_bonus = """When generating the reward function, follow this critical rule for numerical stability: 
+The final reward must NOT be the sum of the original_reward and a function of the original_reward 
+(i.e., avoid reward = base + f(base)). Instead, use one of these two stable patterns:
+Reward Replacement: Create a new reward value by applying a bounded function to the original reward 
+(e.g., final_reward = torch.tanh(original_reward) + action_penalty).
+Independent Addition: Add or subtract terms that depend on the action or observation, not the original_reward itself 
+(e.g., final_reward = original_reward - 0.01 * torch.norm(action))."""
 num_rew_funcs_directive = """Please design 16 seperate reward functions."""
 rew_reflection_1 = """We trained a RL policy using the provided reward function code and tracked the values of the
 individual components in the reward function as well as global policy metrics such as

@@ -58,15 +58,3 @@ def calculate_fitness_walker2d(env: gym.Env, policy, num_episodes: int = 3) -> f
 
     overall_average_speed = np.mean(all_episode_speeds)
     return overall_average_speed
-
-
-# Define reward functions
-def walker2d_less_speed(observation, action, original_reward, terminated, truncated, info):
-    forward_vel = info.get('x_velocity', 0.0)
-    return original_reward + 0 * forward_vel
-
-
-def walker2d_more_speed(observation, action, original_reward, terminated, truncated, info):
-    # ... (simplified logic)
-    forward_vel = info.get('x_velocity', 0.0)
-    return original_reward + 0.1 * forward_vel
