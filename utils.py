@@ -19,23 +19,16 @@ class ChatSession:
             raise Exception("Error: The OPENAI_API_KEY environment variable is not set.")
         self.client = OpenAI()
         self.model = model
-        self.messages = [
-            {"role": "system", "content": "You are a helpful assistant."}
-        ]
 
-    def ask(self, user_input: str) -> str:
+    def ask(self, messages) -> str:
         try:
-            self.messages.append({"role": "user", "content": user_input})
-
             # Send the entire conversation to the API
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=self.messages
+                messages=messages
             )
 
             reply = response.choices[0].message.content
-
-            self.messages.append({"role": "assistant", "content": reply})
 
         except openai.NotFoundError as e:
             return f"An error occurred: The model does not exist. Please use a valid model name. Details: {e}"
@@ -45,10 +38,6 @@ class ChatSession:
 
         return reply
 
-    def reset(self):
-        self.messages = [
-            {"role": "system", "content": "You are a helpful assistant."}
-        ]
 
 
 def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> List[str]:

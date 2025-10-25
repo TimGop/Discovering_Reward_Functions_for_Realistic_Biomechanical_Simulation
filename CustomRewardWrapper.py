@@ -2,20 +2,19 @@ import gymnasium as gym
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from typing import Callable, Dict, Tuple
 import re
-import torch
 import tempfile
 import importlib.util
 import sys
+import torch
 from pathlib import Path
 
 
 # creates a version of a given gym environment where we can add a custom reward function
 class CustomRewardWrapper(gym.Wrapper):
-    # ... (Implementation remains the same, but we add a policy ID) ...
     def __init__(self, env: gym.Env, reward_fn: Callable, policy_id: str):
         super().__init__(env)
         self.custom_reward_fn = reward_fn
-        self.policy_id = policy_id  # Store the specific policy ID
+        self.policy_id = policy_id
 
     def step(self, action):
         observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
@@ -27,20 +26,18 @@ class CustomRewardWrapper(gym.Wrapper):
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
-        # Calculate new reward
         new_reward_tuple = self.custom_reward_fn(
             observation, action_tensor, original_reward, terminated, truncated
         )
         new_reward = new_reward_tuple[0]
 
+        if torch.isnan(new_reward).any() or torch.isinf(new_reward).any():
+            new_reward = torch.zeros_like(new_reward)
+
         info["custom_policy_id"] = self.policy_id
 
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info
 
-
-# --- RLlib Custom Environment Class ---
-# RLlib works best when you define a custom environment that inherits from MultiAgentEnv
-# to handle the policy routing.
 
 class CustomMultiPolicyWalker(MultiAgentEnv):
     def __init__(self, env_config: Dict):
@@ -50,23 +47,21 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
         self.reward_fn_list = env_config["reward_fn_list"]
         self.env_id = env_config["env_id"]
 
-        # Create a dictionary to hold all independent environment instances
+        # dictionary to hold all independent environment instances
         self.envs = {}
         self.policy_ids = [f"policy_{i}" for i in range(self.num_policies)]
         self.possible_agents = self.policy_ids
 
-        # Instantiate N environments, each with its own reward function and policy ID
+        # instantiate N environments with own reward function and policy ID
         for i, p_id in enumerate(self.policy_ids):
             base_env = gym.make(self.env_id)
-            # Apply your custom reward wrapper, passing the specific policy ID
+            # Apply custom reward wrapper, passing the specific policy ID
             wrapped_env = CustomRewardWrapper(base_env, self.reward_fn_list[i], p_id)
             self.envs[p_id] = wrapped_env
 
-        # 1. Get the single-agent space from an instance
         single_obs_space = self.envs[self.policy_ids[0]].observation_space
         single_act_space = self.envs[self.policy_ids[0]].action_space
 
-        # 2. Define the *required* multi-agent spaces as dictionaries
         self.action_space = gym.spaces.Dict(
             {p_id: single_act_space for p_id in self.policy_ids}
         )
@@ -74,7 +69,6 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
             {p_id: single_obs_space for p_id in self.policy_ids}
         )
 
-        # RLlib maps policies to agents. Here, each 'agent' is an environment instance.
         self._agent_ids = set(self.policy_ids)
         self.agents = self.policy_ids
 
@@ -91,7 +85,6 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
     def step(self, action_dict: Dict) -> Tuple[Dict, Dict, Dict, Dict, Dict]:
         obs, rewards, terminated, truncated, info = {}, {}, {}, {}, {}
 
-        # Iterate over all policies and run one step for each environment
         for p_id, action in action_dict.items():
             env = self.envs[p_id]
             o, r, t, tr, i = env.step(action)
@@ -100,13 +93,13 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
             rewards[p_id] = r
             terminated[p_id] = t
             truncated[p_id] = tr
-            # Pass the info back, which now contains the "custom_policy_id" tag
             info[p_id] = i
 
         # RLlib requires a single __all__ flag when all agents are done
         terminated["__all__"] = any(terminated.values())
         truncated["__all__"] = any(truncated.values())
 
+        # TODO can this be removed below
         done = terminated["__all__"] or truncated["__all__"]
         terminated["__all__"] = done
         truncated["__all__"] = done
@@ -115,7 +108,7 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
 
 
 def compile_func_from_string(
-    code_string: str) -> callable:
+        code_string: str) -> callable:
     name_pattern = re.compile(r"def\s+([a-zA-Z_]\w*)")
     match = name_pattern.search(code_string)
     if not match:
@@ -145,16 +138,14 @@ def compile_func_from_string(
 
 
 class RewardFunctionWrapper:
-    """A serializable wrapper that compiles a function from a string on a worker."""
-
     def __init__(self, code_string: str):
         self.code_string = code_string
         self._compiled_func = None
 
     def __call__(self, *args, **kwargs):
         if self._compiled_func is None:
-            # This print statement is helpful for confirming that compilation
-            # is happening on the worker, not the main process.
+            """print statement is helpful for confirming that compilation
+            is happening on the worker, not the main process."""
             print(f"Compiling reward function on worker...")
             self._compiled_func = compile_func_from_string(self.code_string)
             print("Compilation complete.")

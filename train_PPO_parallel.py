@@ -53,27 +53,28 @@ def train_rllib_multi_policy(
         )
         .framework("torch")
         .env_runners(
-            num_env_runners=4,
-            num_envs_per_env_runner=1,
+            num_env_runners=0,
+            # num_env_runners=4,
+            # num_envs_per_env_runner=1,
             observation_filter="MeanStdFilter",
-            rollout_fragment_length=2048
+            # rollout_fragment_length=2048
         )
+        .rl_module(model_config={
+            "fcnet_hiddens": hidden_layers,
+            "fcnet_activation": "tanh",
+            # match the separate policy_net and value_net
+            "vf_share_layers": False,
+        })
         .training(
             lr=3e-4,
             train_batch_size=8192,
             minibatch_size=64,
-            num_sgd_iter=10,
+            num_epochs=10,  # num_sgd_iter
             lambda_=0.95,
             clip_param=0.2,
             entropy_coeff=0.0,
             vf_loss_coeff=0.5,
             grad_clip=0.5,
-            model={
-                "fcnet_hiddens": hidden_layers,
-                "fcnet_activation": "tanh",
-                # match the separate policy_net and value_net
-                "vf_share_layers": False,
-            },
             gamma=0.99,
         )
         .resources(
@@ -86,12 +87,14 @@ def train_rllib_multi_policy(
         )
         .debugging(seed=0)
     )
+    # config.env_runners(max_requests_in_flight_per_env_runner=2)
+    config.env_runners(sample_timeout_s=180)
 
     algo = config.build_algo()
 
     timesteps_so_far = 0
     iteration = 0
-    max_fitness = [0 for _ in range(num_parallel_policies)]
+    max_fitness = [0.0 for _ in range(num_parallel_policies)]
 
     print(f"Starting Multi-Policy PPO Training for {num_parallel_policies} Policies...")
 

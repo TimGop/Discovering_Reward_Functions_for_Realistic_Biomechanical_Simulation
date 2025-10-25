@@ -1,3 +1,6 @@
+init_user_prompt = """The Python environment is {task_obs_code_string}.
+ Write a reward function for the following task: {task_description}."""
+
 init_sys_prompt = """You are a reward engineer trying to write reward functions to solve reinforcement learning
 tasks as effective as possible.
 Your goal is to write a reward function for the environment that will help the agent learn the
@@ -48,6 +51,10 @@ variable should not be specified as torch.Tensor
 (4) Most importantly, the reward code’s input variables must contain only attributes of
 the provided environment class definition (namely, variables that have prefix self.).
 Under no circumstance can you introduce new input variables.
+(5) 'Tensor' objects have no attribute or method 'new_tensor' therefore  code like 
+temp_tanh = observation.new_tensor(1.8) will throw an error and should be avoided.
+(6) When generating Python functions, ensure the entire function signature (the def line, all arguments,
+ the -> return type annotation, and the final colon :) is always on a single, unbroken line.
 """
 code_formatting_tip_bonus = """When generating the reward function, follow this critical rule for numerical stability: 
 The final reward must NOT be the sum of the original_reward and a function of the original_reward 
