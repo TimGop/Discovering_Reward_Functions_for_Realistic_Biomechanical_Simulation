@@ -44,7 +44,7 @@ def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> Lis
     """
     Parses a text blob to find all Python code blocks, validates that each
     can be compiled by torch.jit.script, and returns a list of the valid
-    code STRINGS.
+    code strings.
     """
     if required_imports is None:
         required_imports = ["import torch", "from typing import Tuple", "from typing import Dict"]
@@ -92,7 +92,7 @@ def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> Lis
             print(f"Validation failed for block {i + 1}. Error: {e}")
             print("-" * 20)
 
-    print(f"\nValidation complete. Found {len(valid_code_strings)} valid functions.")
+    print(f"Validation complete. Found {len(valid_code_strings)} valid functions.\n")
     return valid_code_strings
 
 

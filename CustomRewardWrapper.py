@@ -1,4 +1,5 @@
 import gymnasium as gym
+import numpy as np
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from typing import Callable, Dict, Tuple
 import re
@@ -15,26 +16,48 @@ class CustomRewardWrapper(gym.Wrapper):
         super().__init__(env)
         self.custom_reward_fn = reward_fn
         self.policy_id = policy_id
+        self.x_velocities = []
+        self.reward_components = {}
+
+    def reset(self, *, seed=None, options=None):
+        observation_np, info = super().reset(seed=seed, options=options)
+        self.x_velocities = []
+        self.reward_components = {}
+        return observation_np, info
 
     def step(self, action):
         observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
 
-        # torch.jit.script reward function expects tensors
         observation = torch.as_tensor(observation_np, dtype=torch.float32)
         action_tensor = torch.as_tensor(action, dtype=torch.float32)
         original_reward = torch.as_tensor(original_reward_np, dtype=torch.float32)
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
-        new_reward_tuple = self.custom_reward_fn(
+        new_reward, reward_components = self.custom_reward_fn(
             observation, action_tensor, original_reward, terminated, truncated
         )
-        new_reward = new_reward_tuple[0]
+
+        # update reward components or create new list if first append
+        for key, value in reward_components.items():
+            self.reward_components.setdefault(key, []).append(value)
+        self.x_velocities.append(info.get('x_velocity', 0.0))  # x_vel for fitness
 
         if torch.isnan(new_reward).any() or torch.isinf(new_reward).any():
             new_reward = torch.zeros_like(new_reward)
 
-        info["custom_policy_id"] = self.policy_id
+        is_done = terminated_np or truncated_np
+        if is_done:
+            episode_duration = len(self.x_velocities)
+            if episode_duration > 0:
+                velocity_sum = sum(self.x_velocities)
+                fitness_score = np.float64(velocity_sum / episode_duration)
+            else:
+                fitness_score = np.float64(0.0)
+
+            info["fitness_score"] = fitness_score
+            info["episode_length"] = np.float64(episode_duration)
+            info["reward_components"] = {key: np.float64(sum(value_list)) for key, value_list in self.reward_components.items()}
 
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info
 
@@ -42,7 +65,6 @@ class CustomRewardWrapper(gym.Wrapper):
 class CustomMultiPolicyWalker(MultiAgentEnv):
     def __init__(self, env_config: Dict):
         super().__init__()
-
         self.num_policies = env_config["num_policies"]
         self.reward_fn_list = env_config["reward_fn_list"]
         self.env_id = env_config["env_id"]
@@ -50,7 +72,7 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
         # dictionary to hold all independent environment instances
         self.envs = {}
         self.policy_ids = [f"policy_{i}" for i in range(self.num_policies)]
-        self.possible_agents = self.policy_ids
+        self.possible_agents = self.policy_ids.copy()
 
         # instantiate N environments with own reward function and policy ID
         for i, p_id in enumerate(self.policy_ids):
@@ -70,7 +92,8 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
         )
 
         self._agent_ids = set(self.policy_ids)
-        self.agents = self.policy_ids
+        self.agents = self.policy_ids.copy()
+        self.info = {}
 
     def reset(self, *, seed=None, options=None) -> Tuple[Dict, Dict]:
         obs = {}
@@ -79,7 +102,8 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
             o, i = env.reset(seed=seed, options=options)
             obs[p_id] = o
             info[p_id] = i
-        self.agents = self.policy_ids
+        self.agents = self.policy_ids.copy()
+        self.info = {}
         return obs, info
 
     def step(self, action_dict: Dict) -> Tuple[Dict, Dict, Dict, Dict, Dict]:
@@ -94,15 +118,13 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
             terminated[p_id] = t
             truncated[p_id] = tr
             info[p_id] = i
+            if t or tr:
+                self.agents.remove(p_id)
+                self.info[p_id] = info[p_id]
 
         # RLlib requires a single __all__ flag when all agents are done
-        terminated["__all__"] = any(terminated.values())
-        truncated["__all__"] = any(truncated.values())
-
-        # TODO can this be removed below
-        done = terminated["__all__"] or truncated["__all__"]
-        terminated["__all__"] = done
-        truncated["__all__"] = done
+        terminated["__all__"] = not self.agents
+        truncated["__all__"] = not self.agents
 
         return obs, rewards, terminated, truncated, info
 

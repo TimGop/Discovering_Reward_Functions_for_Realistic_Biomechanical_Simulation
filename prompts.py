@@ -66,7 +66,7 @@ Independent Addition: Add or subtract terms that depend on the action or observa
 num_rew_funcs_directive = """Please design 16 seperate reward functions."""
 rew_reflection_1 = """We trained a RL policy using the provided reward function code and tracked the values of the
 individual components in the reward function as well as global policy metrics such as
-success rates and episode lengths after every {epoch_freq} epochs and the maximum, mean,
+fitness scores and episode lengths after every {epoch_freq} epochs and the maximum, mean,
 minimum values encountered:"""
 rew_reflection_2 = """Please carefully analyze the policy feedback and provide a new, improved reward function that
 can better solve the task. Some helpful tips for analyzing the policy feedback:
