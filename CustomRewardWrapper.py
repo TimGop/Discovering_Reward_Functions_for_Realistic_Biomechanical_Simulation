@@ -9,6 +9,8 @@ import sys
 import torch
 from pathlib import Path
 
+EXPECTED_NAME = "custom_reward_fn"
+
 
 # creates a version of a given gym environment where we can add a custom reward function
 class CustomRewardWrapper(gym.Wrapper):
@@ -57,7 +59,8 @@ class CustomRewardWrapper(gym.Wrapper):
 
             info["fitness_score"] = fitness_score
             info["episode_length"] = np.float64(episode_duration)
-            info["reward_components"] = {key: np.float64(sum(value_list)) for key, value_list in self.reward_components.items()}
+            info["reward_components"] = {key: np.float64(sum(value_list))
+                                         for key, value_list in self.reward_components.items()}
 
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info
 
@@ -130,13 +133,27 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
 
 
 def compile_func_from_string(
-        code_string: str) -> callable:
+        code_string: str) -> Callable:
+    """
+    Compiles a function from a string.
+    Finds the expected 'custom_reward_fn', creates a temporary .py file,
+    imports it, and returns the function object.
+    """
+    # Find the expected function name
     name_pattern = re.compile(r"def\s+([a-zA-Z_]\w*)")
     match = name_pattern.search(code_string)
     if not match:
-        raise ValueError("Could not find function definition in code string.")
+        raise ValueError("Could not find any function definition 'def ...' in code string.")
 
     function_name = match.group(1)
+
+    # Validate that the *first* function found is the one we expect.
+    # This is a reasonable assumption for these code blocks.
+    if function_name != EXPECTED_NAME:
+        raise ValueError(f"Function name is incorrect. Expected: '{EXPECTED_NAME}', Got: '{function_name}'")
+
+    tmp_path = None
+    module_name = None
 
     try:
         # Using delete=False is crucial for compatibility, especially on Windows
@@ -147,15 +164,25 @@ def compile_func_from_string(
 
             module_name = tmp_path.stem
             spec = importlib.util.spec_from_file_location(module_name, tmp_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not create module spec from {tmp_path}")
+
             imported_module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = imported_module
+
+            # This executes the code, including imports and decorators
             spec.loader.exec_module(imported_module)
+
+            # Get the specific function we're looking for
+            if not hasattr(imported_module, function_name):
+                raise AttributeError(f"Module was imported but does not have function '{function_name}'.")
+
             func_object = getattr(imported_module, function_name)
             return func_object
     finally:
-        if 'tmp_path' in locals() and tmp_path.exists():
+        if tmp_path and tmp_path.exists():
             tmp_path.unlink()
-        if 'module_name' in locals() and module_name in sys.modules:
+        if module_name and module_name in sys.modules:
             del sys.modules[module_name]
 
 

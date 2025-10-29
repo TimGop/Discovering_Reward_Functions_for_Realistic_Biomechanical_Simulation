@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def _update_stats(training_results, result, policy_names):
     for idx, p_id in enumerate(policy_names):
+        print(f"result is {result}")
         ep_scores = result["env_runners"]["policy_dicts"][p_id]["fitness_score"]
         ep_lens = result["env_runners"]["policy_dicts"][p_id]["episode_length"]
         reward_components = result["env_runners"]["policy_dicts"][p_id]["reward_components"]
@@ -62,6 +63,7 @@ def _finalize_stats(results):
 
 
 def train_rllib_multi_policy(
+        env_id: str,
         reward_list: list,
         max_iterations: int = 3_000,
         hidden_layers: list[int] = None,
@@ -77,7 +79,6 @@ def train_rllib_multi_policy(
     def policy_mapping_fn(agent_id, episode, **kwargs):
         return agent_id
 
-    env_id = "Walker2d-v4"
     temp_env = gym.make(env_id)
     obs_space = temp_env.observation_space
     act_space = temp_env.action_space
@@ -213,7 +214,7 @@ def train_rllib_multi_policy(
 if __name__ == '__main__':
     # for testing purposes
     reward_fn_list = [walker2d_less_speed for _ in range(4)]  # [walker2d_less_speed for _ in range(4)]
-    fitness_per_rew_func = train_rllib_multi_policy(
-        reward_list=reward_fn_list, stat_frequency=2, max_iterations=4
-    )
+    fitness_per_rew_func = train_rllib_multi_policy(env_id="Walker2d-v4",
+                                                    reward_list=reward_fn_list, stat_frequency=2, max_iterations=4
+                                                    )
     print(fitness_per_rew_func)

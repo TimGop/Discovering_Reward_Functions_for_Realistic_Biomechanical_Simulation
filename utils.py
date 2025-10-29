@@ -1,17 +1,21 @@
 import openai
 import os
 from openai import OpenAI
+import gymnasium as gym
 
 from CustomRewardWrapper import compile_func_from_string
 import re
-from typing import List, Callable, Any
-
-# New imports needed for the solution
+from typing import List, Callable, Any, Tuple, Dict
+import torch
 import tempfile
 import importlib.util
 import sys
 from pathlib import Path
+import inspect
 
+EXPECTED_NAME = "custom_reward_fn"
+EXPECTED_PARAMS = ["observation", "action", "original_reward", "terminated", "truncated"]
+EXPECTED_RETURN_TYPE = Tuple[torch.Tensor, Dict[str, torch.Tensor]]
 
 class ChatSession:
     def __init__(self, model="gpt-5-nano-2025-08-07"):
@@ -39,15 +43,16 @@ class ChatSession:
         return reply
 
 
-
-def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> List[str]:
+def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None) -> List[str]:
     """
-    Parses a text blob to find all Python code blocks, validates that each
-    can be compiled by torch.jit.script, and returns a list of the valid
-    code strings.
+    Parses a text blob to find all Python code blocks.
+    Validates that each block *contains* '@torch.jit.script' and
+    matches the required Python function signature.
+    Returns a list of the valid original code strings (with decorator intact).
     """
     if required_imports is None:
         required_imports = ["import torch", "from typing import Tuple", "from typing import Dict"]
+
     patterns = [
         r'"""python(.*?)"""',
         r"‘‘‘python(.*?)‘‘‘",
@@ -70,25 +75,72 @@ def parse_and_validate_code_blocks(text_blob: str, required_imports=None) -> Lis
 
     valid_code_strings = []
     for i, code_str in enumerate(code_blocks):
+
         try:
-            # Attempt to compile the function here in the main process.
-            # We don't keep the result; this is purely for validation.
-            # Prepend any required import statements
+            if f"def {EXPECTED_NAME}" not in code_str:
+                raise ValueError(f"Could not find function definition 'def {EXPECTED_NAME}'")
+
+            if "@torch.jit.script" not in code_str:
+                raise ValueError("Could not find decorator '@torch.jit.script'")
+
+            compilation_code_str = code_str.replace("@torch.jit.script", "")
+
             import_statements = ""
             if required_imports:
                 import_statements = "\n".join([f"{lib}" for lib in required_imports]) + "\n\n"
 
-            full_code = import_statements + code_str
+            full_code_for_inspection = import_statements + compilation_code_str
+            original_full_code = import_statements + code_str
 
             print(f"Validating block {i + 1}...")
-            compile_func_from_string(full_code)
+            function_jit = compile_func_from_string(original_full_code)
 
-            # If the line above doesn't raise an error, the code is valid.
+            # Compile the *non-JIT* function for inspection
+            function = compile_func_from_string(full_code_for_inspection)
+
+            # ["observation", "action", "original_reward", "terminated", "truncated"]
+            temp_env = gym.make(env_id)
+            obs_np, info = temp_env.reset()
+            action_np = temp_env.action_space.sample()
+            next_observation_np, reward_np, terminated, truncated, info = temp_env.step(action_np)
+            temp_env.close()
+
+            obs_tensor = torch.as_tensor(next_observation_np, dtype=torch.float32)
+            act_tensor = torch.as_tensor(action_np, dtype=torch.float32)
+            rew_tensor = torch.as_tensor(reward_np, dtype=torch.float32)
+            term_tensor = torch.as_tensor(terminated, dtype=torch.bool)
+            trunc_tensor = torch.as_tensor(truncated, dtype=torch.bool)
+
+            # Call the *scripted_function*
+            new_reward, components = function_jit(
+                obs_tensor, act_tensor, rew_tensor, term_tensor, trunc_tensor
+            )
+            assert components
+
+            if not inspect.isfunction(function):
+                # This might happen if the decorator removal fails or code is unusual
+                raise TypeError(f"Loaded object is not a Python function. Got: {type(function)}")
+
+            # Validate signature directly on the Python function
+            sig = inspect.signature(function)
+
+            # Validate parameters
+            actual_params = list(sig.parameters.keys())
+            if actual_params != EXPECTED_PARAMS:
+                raise ValueError(f"Function has incorrect parameters. "
+                                 f"Expected: {EXPECTED_PARAMS}, Got: {actual_params}")
+
+            # Validate return type
+            actual_return = sig.return_annotation
+            if actual_return != EXPECTED_RETURN_TYPE:
+                raise ValueError(f"Function has incorrect return type. "
+                                 f"Expected: {EXPECTED_RETURN_TYPE}, Got: {actual_return}")
+
+            # If all checks pass, the code is valid.
             print(f"Block {i + 1} is valid.")
-            valid_code_strings.append(full_code)
+            valid_code_strings.append(original_full_code)  # Save the original jit version
 
         except Exception as e:
-            # If compilation fails, report the error and skip this function.
             print(f"Validation failed for block {i + 1}. Error: {e}")
             print("-" * 20)
 

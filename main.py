@@ -7,11 +7,12 @@ from environment_code import walker_2d_v4_code
 from CustomRewardWrapper import RewardFunctionWrapper
 
 
-def get_funcs(gpt, messages, num_funcs=16):
+def get_funcs(env_id, gpt, messages, num_funcs=16):
     reward_funcs = []
     while len(reward_funcs) < num_funcs:
         reward_string = gpt.ask(messages=messages)
-        reward_funcs += [RewardFunctionWrapper(string) for string in parse_and_validate_code_blocks(reward_string)]
+        reward_funcs += [RewardFunctionWrapper(string)
+                         for string in parse_and_validate_code_blocks(env_id, reward_string)]
     assert len(reward_funcs) > 0
     return reward_funcs
 
@@ -58,13 +59,13 @@ def get_reflection(training_results, messages, epoch_freq):
         messages += [{"role": "user", "content": reflection_string}]
     else:
         assert len(messages) == 4
-        messages += [{"role": "assistant", "content": best_code_string}]
-        messages += [{"role": "user", "content": reflection_string}]
+        messages[-2] = {"role": "assistant", "content": best_code_string}
+        messages[-1] = {"role": "user", "content": reflection_string}
 
     return messages
 
 
-def reward_evolution(num_iterations=5, max_its_rl_run=3_000):
+def reward_evolution(env_id, num_iterations=5, max_its_rl_run=3_000):
     if num_iterations < 1:
         num_iterations = 1
     epoch_freq = max(int(max_its_rl_run // 10), 1)
@@ -77,20 +78,18 @@ def reward_evolution(num_iterations=5, max_its_rl_run=3_000):
                                           task_description=walker_2d_v4_description)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
 
-    reward_funcs = get_funcs(gpt, messages=messages)
-    # TODO: This function must be modified to return detailed results: i.e. a list containing a dict for each rl_reward
-    #       [{"score": dict, "reward_components": dict, "ep_lens": dict, "error": str, "code": str}, ...]
-    training_results = train_rllib_multi_policy(reward_list=reward_funcs, max_iterations=4,
+    print(f"Running iteration {1} of reward iteration process...")
+    reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
+    training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
                                                 stat_frequency=2)
     messages = get_reflection(training_results, messages, epoch_freq)
-    print(f"first full reflection prompt looks like this:\n {messages}")
     for iteration in range(num_iterations - 1):
-        print(f"Running iteration {iteration + 1} of reward iteration process...")
-        reward_funcs = get_funcs(gpt, messages=messages)
-        training_results = train_rllib_multi_policy(reward_list=reward_funcs, max_iterations=4,
+        print(f"Running iteration {iteration + 2} of reward iteration process...")
+        reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
+        training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
                                                     stat_frequency=epoch_freq)
         messages = get_reflection(training_results, messages, epoch_freq)
 
 
 if __name__ == '__main__':
-    reward_evolution(num_iterations=5, max_its_rl_run=3_000)
+    reward_evolution(env_id="Walker2d-v4", num_iterations=5, max_its_rl_run=3_000)
