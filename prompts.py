@@ -9,7 +9,7 @@ Your reward function should use useful variables from the environment as inputs.
 the reward function signature can be:
 ‘‘‘
 @torch.jit.script
-def custom_reward_fn(observation, action, original_reward, terminated, truncated)
+def custom_reward_fn(observation, action, original_reward, next_observation, terminated, truncated)
  -> Tuple[torch.Tensor,Dict[str, torch.Tensor]]:
 ...
 return reward, {}‘‘‘
@@ -20,19 +20,20 @@ For example: info: Dict[str, torch.Tensor] = {}.
 Make sure any new tensor or variable you introduce is on the same device as the input tensors."""
 reward_func_context = """Note that the reward function will be called in the following context in a wrapper class that 
 overrides the original step method of an environment to implement its own custom reward function:
-    def step(self, action):
+            def step(self, action):
         observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
-        observation = torch.as_tensor(observation_np, dtype=torch.float32)
-        action_tensor = torch.as_tensor(action, dtype=torch.float32)
+        
+        observation = torch.as_tensor(self.current_observation, dtype=torch.float32)
+        next_observation = torch.as_tensor(observation_np, dtype=torch.float32)
+        action = torch.as_tensor(action, dtype=torch.float32)
         original_reward = torch.as_tensor(original_reward_np, dtype=torch.float32)
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
-        # Calculate new reward
-        new_reward_tuple = self.custom_reward_fn(
-            observation, action_tensor, original_reward, terminated, truncated
+
+        new_reward, reward_components = self.custom_reward_fn(
+            observation, action, original_reward, next_observation, terminated, truncated
         )
-        new_reward = new_reward_tuple[0]
-        info["custom_policy_id"] = self.policy_id
+        # rest of step function code...
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info"""
 pre_env = """Below is the code for the environment:"""
 code_formatting_tip = """The output of a reward function should consist of two items:

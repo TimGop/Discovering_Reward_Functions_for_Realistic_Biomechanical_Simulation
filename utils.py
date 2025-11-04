@@ -14,7 +14,7 @@ from pathlib import Path
 import inspect
 
 EXPECTED_NAME = "custom_reward_fn"
-EXPECTED_PARAMS = ["observation", "action", "original_reward", "terminated", "truncated"]
+EXPECTED_PARAMS = ["observation", "action", "original_reward", "next_observation", "terminated", "truncated"]
 EXPECTED_RETURN_TYPE = Tuple[torch.Tensor, Dict[str, torch.Tensor]]
 
 class ChatSession:
@@ -98,14 +98,15 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
             # Compile the *non-JIT* function for inspection
             function = compile_func_from_string(full_code_for_inspection)
 
-            # ["observation", "action", "original_reward", "terminated", "truncated"]
+            # ["observation", "action", "original_reward", "next_observation", "terminated", "truncated"]
             temp_env = gym.make(env_id)
             obs_np, info = temp_env.reset()
             action_np = temp_env.action_space.sample()
-            next_observation_np, reward_np, terminated, truncated, info = temp_env.step(action_np)
+            next_obs_np, reward_np, terminated, truncated, info = temp_env.step(action_np)
             temp_env.close()
 
-            obs_tensor = torch.as_tensor(next_observation_np, dtype=torch.float32)
+            obs_tensor = torch.as_tensor(obs_np, dtype=torch.float32)
+            next_obs_tensor = torch.as_tensor(next_obs_np, dtype=torch.float32)
             act_tensor = torch.as_tensor(action_np, dtype=torch.float32)
             rew_tensor = torch.as_tensor(reward_np, dtype=torch.float32)
             term_tensor = torch.as_tensor(terminated, dtype=torch.bool)
@@ -113,7 +114,7 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
 
             # Call the *scripted_function*
             new_reward, components = function_jit(
-                obs_tensor, act_tensor, rew_tensor, term_tensor, trunc_tensor
+                obs_tensor, act_tensor, rew_tensor, next_obs_tensor, term_tensor, trunc_tensor
             )
             assert components
 

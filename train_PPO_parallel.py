@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def _update_stats(training_results, result, policy_names):
     for idx, p_id in enumerate(policy_names):
-        print(f"result is {result}")
+        # print(f"result is {result}")
         ep_scores = result["env_runners"]["policy_dicts"][p_id]["fitness_score"]
         ep_lens = result["env_runners"]["policy_dicts"][p_id]["episode_length"]
         reward_components = result["env_runners"]["policy_dicts"][p_id]["reward_components"]

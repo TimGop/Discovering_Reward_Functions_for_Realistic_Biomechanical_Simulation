@@ -78,16 +78,31 @@ def reward_evolution(env_id, num_iterations=5, max_its_rl_run=3_000):
                                           task_description=walker_2d_v4_description)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
 
-    print(f"Running iteration {1} of reward iteration process...")
+    print(f"Running iteration 1 of reward iteration process...")
     reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
-    training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
-                                                stat_frequency=2)
+    # TODO set correct iterations, epoch freq etc. for full training when done debugging
+    while True:
+        try:
+            training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
+                                                        stat_frequency=2)
+            break
+        except Exception as e:
+            print("training failed..."
+                  " usually due to ray.rllibs workers randomly not collecting data if persists terminate process")
+
     messages = get_reflection(training_results, messages, epoch_freq)
     for iteration in range(num_iterations - 1):
         print(f"Running iteration {iteration + 2} of reward iteration process...")
         reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
-        training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
-                                                    stat_frequency=epoch_freq)
+        while True:
+            try:
+                training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
+                                                            stat_frequency=2)
+                break
+            except Exception as e:
+                print("training failed..."
+                      " usually due to ray.rllibs workers randomly not collecting data if persists terminate process")
+
         messages = get_reflection(training_results, messages, epoch_freq)
 
 

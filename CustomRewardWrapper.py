@@ -20,25 +20,30 @@ class CustomRewardWrapper(gym.Wrapper):
         self.policy_id = policy_id
         self.x_velocities = []
         self.reward_components = {}
+        self.current_observation = None
 
     def reset(self, *, seed=None, options=None):
         observation_np, info = super().reset(seed=seed, options=options)
         self.x_velocities = []
         self.reward_components = {}
+        self.current_observation = observation_np
         return observation_np, info
 
     def step(self, action):
         observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
 
-        observation = torch.as_tensor(observation_np, dtype=torch.float32)
-        action_tensor = torch.as_tensor(action, dtype=torch.float32)
+        observation = torch.as_tensor(self.current_observation, dtype=torch.float32)
+        next_observation = torch.as_tensor(observation_np, dtype=torch.float32)
+        action = torch.as_tensor(action, dtype=torch.float32)
         original_reward = torch.as_tensor(original_reward_np, dtype=torch.float32)
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
         new_reward, reward_components = self.custom_reward_fn(
-            observation, action_tensor, original_reward, terminated, truncated
+            observation, action, original_reward, next_observation, terminated, truncated
         )
+
+        self.current_observation = observation_np
 
         # update reward components or create new list if first append
         for key, value in reward_components.items():
