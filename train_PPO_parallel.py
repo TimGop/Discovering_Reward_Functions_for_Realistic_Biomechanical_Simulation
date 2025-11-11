@@ -3,7 +3,7 @@ from ray.rllib.algorithms.ppo import PPOConfig
 
 from Callbacks import LogMetrics
 from CustomRewardWrapper import CustomMultiPolicyWalker  # Assuming this file exists
-from fitness_funcs_and_placeholder_reward_funcs import walker2d_less_speed
+from fitness_funcs_and_placeholder_reward_funcs import walker2d_original_reward
 from CustomRewardWrapper import RewardFunctionWrapper
 import gymnasium as gym
 import warnings
@@ -72,7 +72,7 @@ def train_rllib_multi_policy(
     if not hidden_layers:
         hidden_layers = [64, 64]
 
-    ray.init(ignore_reinit_error=True)
+    # ray.init(ignore_reinit_error=True)
 
     num_parallel_policies = len(reward_list)
 
@@ -114,7 +114,7 @@ def train_rllib_multi_policy(
             model_config={
                 "fcnet_hiddens": hidden_layers,
                 "fcnet_activation": "tanh",
-                "vf_share_layers": False,
+                "vf_share_layers": True,
             })
 
     # define policy spaces and run config
@@ -140,11 +140,10 @@ def train_rllib_multi_policy(
         .callbacks(LogMetrics)
         .framework("torch")
         .env_runners(
-            num_env_runners=1,
-            # num_env_runners=4,
-            # num_envs_per_env_runner=1,
+            num_env_runners=8,  # CRITICAL CHANGE: Set to 8 workers
+            num_envs_per_env_runner=1,
             observation_filter="MeanStdFilter",
-            # rollout_fragment_length=2048
+            rollout_fragment_length=1024
         )
         .rl_module(
             rl_module_spec=MultiRLModuleSpec(
@@ -152,12 +151,12 @@ def train_rllib_multi_policy(
             )
         )
         .training(
-            lr=3e-4,
-            train_batch_size=8192,  # 16_384
-            minibatch_size=1024,  # train_batch_size / 8
+            lr=2.15e-4,
+            train_batch_size=8192,  # Eureka uses 131,072
+            minibatch_size=64,
             num_epochs=10,  # num_sgd_iter
-            lambda_=0.95,
-            clip_param=0.2,
+            lambda_=0.73,
+            clip_param=0.21,
             entropy_coeff=0.0,  # 0.01
             vf_loss_coeff=0.5,
             grad_clip=0.5,
@@ -213,8 +212,8 @@ def train_rllib_multi_policy(
 
 if __name__ == '__main__':
     # for testing purposes
-    reward_fn_list = [walker2d_less_speed for _ in range(4)]  # [walker2d_less_speed for _ in range(4)]
+    reward_fn_list = [walker2d_original_reward for _ in range(1)]
     fitness_per_rew_func = train_rllib_multi_policy(env_id="Walker2d-v4",
-                                                    reward_list=reward_fn_list, stat_frequency=2, max_iterations=4
+                                                    reward_list=reward_fn_list, stat_frequency=1000, max_iterations=3000
                                                     )
     print(fitness_per_rew_func)

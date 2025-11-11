@@ -58,9 +58,9 @@ class CustomRewardWrapper(gym.Wrapper):
             episode_duration = len(self.x_velocities)
             if episode_duration > 0:
                 velocity_sum = sum(self.x_velocities)
-                fitness_score = np.float64(velocity_sum / episode_duration)
+                fitness_score = np.float64(velocity_sum / 1000)  # full episode would have length 1000
             else:
-                fitness_score = np.float64(0.0)
+                fitness_score = np.float64(-1.0)
 
             info["fitness_score"] = fitness_score
             info["episode_length"] = np.float64(episode_duration)
@@ -68,6 +68,24 @@ class CustomRewardWrapper(gym.Wrapper):
                                          for key, value_list in self.reward_components.items()}
 
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info
+
+
+class FlattenStatsWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        is_done = terminated or truncated
+        if is_done and "reward_components" in info:
+            for key, value in info["reward_components"].items():
+                info[f"reward_components/{key}"] = value
+        # sb3 monitor will now see these new scalar keys and log them.
+        # will still ignore the original "reward_components" dict.
+        return obs, reward, terminated, truncated, info
+
+    def reset(self, *, seed=None, options=None):
+        return self.env.reset(seed=seed, options=options)
 
 
 class CustomMultiPolicyWalker(MultiAgentEnv):

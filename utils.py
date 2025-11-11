@@ -44,12 +44,6 @@ class ChatSession:
 
 
 def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None) -> List[str]:
-    """
-    Parses a text blob to find all Python code blocks.
-    Validates that each block *contains* '@torch.jit.script' and
-    matches the required Python function signature.
-    Returns a list of the valid original code strings (with decorator intact).
-    """
     if required_imports is None:
         required_imports = ["import torch", "from typing import Tuple", "from typing import Dict"]
 
@@ -95,7 +89,6 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
             print(f"Validating block {i + 1}...")
             function_jit = compile_func_from_string(original_full_code)
 
-            # Compile the *non-JIT* function for inspection
             function = compile_func_from_string(full_code_for_inspection)
 
             # ["observation", "action", "original_reward", "next_observation", "terminated", "truncated"]
@@ -112,26 +105,21 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
             term_tensor = torch.as_tensor(terminated, dtype=torch.bool)
             trunc_tensor = torch.as_tensor(truncated, dtype=torch.bool)
 
-            # Call the *scripted_function*
             new_reward, components = function_jit(
                 obs_tensor, act_tensor, rew_tensor, next_obs_tensor, term_tensor, trunc_tensor
             )
             assert components
 
             if not inspect.isfunction(function):
-                # This might happen if the decorator removal fails or code is unusual
                 raise TypeError(f"Loaded object is not a Python function. Got: {type(function)}")
 
-            # Validate signature directly on the Python function
             sig = inspect.signature(function)
 
-            # Validate parameters
             actual_params = list(sig.parameters.keys())
             if actual_params != EXPECTED_PARAMS:
                 raise ValueError(f"Function has incorrect parameters. "
                                  f"Expected: {EXPECTED_PARAMS}, Got: {actual_params}")
 
-            # Validate return type
             actual_return = sig.return_annotation
             if actual_return != EXPECTED_RETURN_TYPE:
                 raise ValueError(f"Function has incorrect return type. "

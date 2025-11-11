@@ -1,10 +1,12 @@
-from train_PPO_parallel import train_rllib_multi_policy
-from utils import (ChatSession, save_string_to_file, load_string_from_file,
-                   parse_and_validate_code_blocks)
+# from train_PPO_parallel import train_rllib_multi_policy
+from train_PPO_sb3 import train_sb3_sequnetial_policies
+from utils import (ChatSession, parse_and_validate_code_blocks)
+# save_string_to_file, load_string_from_file,
 from prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1, rew_reflection_2, walker_2d_v4_description,
-                     pre_env, reward_func_context, code_formatting_tip_bonus, init_user_prompt)
+                     reward_func_context, code_formatting_tip_bonus, init_user_prompt)  # ,pre_env
 from environment_code import walker_2d_v4_code
 from CustomRewardWrapper import RewardFunctionWrapper
+# import ray
 
 
 def get_funcs(env_id, gpt, messages, num_funcs=16):
@@ -26,8 +28,9 @@ def get_reflection(training_results, messages, epoch_freq):
             max_fitness = curr_max_fitness
             best_index = idx
 
-    assert best_index  # not None
+    assert best_index is not None  # not None
     best_result = training_results[best_index]
+    print(best_result)
     separator = "\n"
     key_val_format = "{k}: {v}, max: {max}, mean: {mean}, min: {min}"
 
@@ -53,6 +56,7 @@ def get_reflection(training_results, messages, epoch_freq):
     reflection_string = (rew_reflection_1.format(epoch_freq=epoch_freq) + "\n" + reward_component_string + "\n"
                          + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
                          code_formatting_tip_bonus)
+    print("\n\n"+"reflection string:\n"+reflection_string+"\n\n")
 
     if len(messages) == 2:
         messages += [{"role": "assistant", "content": best_code_string}]
@@ -65,10 +69,14 @@ def get_reflection(training_results, messages, epoch_freq):
     return messages
 
 
-def reward_evolution(env_id, num_iterations=5, max_its_rl_run=3_000):
+def reward_evolution(env_id, num_iterations=5, max_timesteps_rl=3_000_000):
     if num_iterations < 1:
         num_iterations = 1
-    epoch_freq = max(int(max_its_rl_run // 10), 1)
+    N_STEPS = 2048
+    N_ENVS = 4
+    batch_size_timesteps = N_STEPS * N_ENVS
+    total_batches = round(max_timesteps_rl / batch_size_timesteps)
+    epoch_freq = max(int(total_batches // 10), 1)
     gpt = ChatSession(model="gpt-5-nano-2025-08-07")  # -nano-2025-08-07
     # TODO at a later stage try removing the code_formatting_tip_bonus again
     sys_prompt = (
@@ -80,15 +88,16 @@ def reward_evolution(env_id, num_iterations=5, max_its_rl_run=3_000):
 
     print(f"Running iteration 1 of reward iteration process...")
     reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
-    # TODO set correct iterations, epoch freq etc. for full training when done debugging
     while True:
         try:
-            training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
-                                                        stat_frequency=2)
+            training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, env_id=env_id,
+                                                             max_its=max_timesteps_rl, stat_frequency=epoch_freq)
+            """training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
+                                                        stat_frequency=2)"""
             break
         except Exception as e:
-            print("training failed..."
-                  " usually due to ray.rllibs workers randomly not collecting data if persists terminate process")
+            print(e)
+            print("training failed...")
 
     messages = get_reflection(training_results, messages, epoch_freq)
     for iteration in range(num_iterations - 1):
@@ -96,15 +105,26 @@ def reward_evolution(env_id, num_iterations=5, max_its_rl_run=3_000):
         reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
         while True:
             try:
-                training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs, max_iterations=4,
-                                                            stat_frequency=2)
+                training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, env_id=env_id,
+                                                                 max_its=max_timesteps_rl, stat_frequency=epoch_freq)
+                """training_results = train_rllib_multi_policy(env_id=env_id, reward_list=reward_funcs,
+                                                                max_iterations=4, stat_frequency=2)"""
                 break
             except Exception as e:
-                print("training failed..."
-                      " usually due to ray.rllibs workers randomly not collecting data if persists terminate process")
+                print(e)
+                print("training failed...")
 
         messages = get_reflection(training_results, messages, epoch_freq)
 
 
 if __name__ == '__main__':
-    reward_evolution(env_id="Walker2d-v4", num_iterations=5, max_its_rl_run=3_000)
+    # TODO parseargs
+    # ray.init(ignore_reinit_error=True)
+    try:
+        num_its_rl = 250  # 250
+        batch_size = 8192
+        reward_evolution(env_id="Walker2d-v4", num_iterations=5, max_timesteps_rl=num_its_rl*batch_size)
+
+    finally:
+        print("eureka done...")
+        # ray.shutdown()
