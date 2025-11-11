@@ -1,10 +1,10 @@
 import ray
 from ray.rllib.algorithms.ppo import PPOConfig
 
-from Callbacks import LogMetrics
-from CustomRewardWrapper import CustomMultiPolicyWalker  # Assuming this file exists
-from fitness_funcs_and_placeholder_reward_funcs import walker2d_original_reward
-from CustomRewardWrapper import RewardFunctionWrapper
+from utils.Callbacks.Callbacks import LogMetrics
+from utils.utils import CustomMultiPolicyWalker  # Assuming this file exists
+from utils.utils import walker2d_original_reward
+from utils.utils import RewardFunctionWrapper
 import gymnasium as gym
 import warnings
 import numpy as np

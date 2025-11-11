@@ -2,15 +2,10 @@ import openai
 import os
 from openai import OpenAI
 import gymnasium as gym
-
-from CustomRewardWrapper import compile_func_from_string
+from utils.CustomRewardWrapper import compile_func_from_string
 import re
-from typing import List, Callable, Any, Tuple, Dict
+from typing import List, Tuple, Dict
 import torch
-import tempfile
-import importlib.util
-import sys
-from pathlib import Path
 import inspect
 
 EXPECTED_NAME = "custom_reward_fn"

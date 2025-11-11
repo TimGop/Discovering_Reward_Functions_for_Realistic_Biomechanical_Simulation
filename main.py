@@ -1,11 +1,11 @@
 # from train_PPO_parallel import train_rllib_multi_policy
-from train_PPO_sb3 import train_sb3_sequnetial_policies
-from utils import (ChatSession, parse_and_validate_code_blocks)
+from train.train_PPO_sb3 import train_sb3_sequnetial_policies
+from utils.utils import (ChatSession, parse_and_validate_code_blocks)
 # save_string_to_file, load_string_from_file,
-from prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1, rew_reflection_2, walker_2d_v4_description,
-                     reward_func_context, code_formatting_tip_bonus, init_user_prompt)  # ,pre_env
-from environment_code import walker_2d_v4_code
-from CustomRewardWrapper import RewardFunctionWrapper
+from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1, rew_reflection_2, walker_2d_v4_description,
+                                                reward_func_context, code_formatting_tip_bonus, init_user_prompt)  # ,pre_env
+from utils.prompts_and_env_code.environment_code import walker_2d_v4_code
+from utils.CustomRewardWrapper import RewardFunctionWrapper
 # import ray
 
 
@@ -30,7 +30,6 @@ def get_reflection(training_results, messages, epoch_freq):
 
     assert best_index is not None  # not None
     best_result = training_results[best_index]
-    print(best_result)
     separator = "\n"
     key_val_format = "{k}: {v}, max: {max}, mean: {mean}, min: {min}"
 
@@ -56,7 +55,6 @@ def get_reflection(training_results, messages, epoch_freq):
     reflection_string = (rew_reflection_1.format(epoch_freq=epoch_freq) + "\n" + reward_component_string + "\n"
                          + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
                          code_formatting_tip_bonus)
-    print("\n\n"+"reflection string:\n"+reflection_string+"\n\n")
 
     if len(messages) == 2:
         messages += [{"role": "assistant", "content": best_code_string}]
@@ -87,7 +85,7 @@ def reward_evolution(env_id, num_iterations=5, max_timesteps_rl=3_000_000):
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
 
     print(f"Running iteration 1 of reward iteration process...")
-    reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
+    reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=2)
     while True:
         try:
             training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, env_id=env_id,
@@ -102,7 +100,7 @@ def reward_evolution(env_id, num_iterations=5, max_timesteps_rl=3_000_000):
     messages = get_reflection(training_results, messages, epoch_freq)
     for iteration in range(num_iterations - 1):
         print(f"Running iteration {iteration + 2} of reward iteration process...")
-        reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=16)
+        reward_funcs = get_funcs(env_id=env_id, gpt=gpt, messages=messages, num_funcs=2)
         while True:
             try:
                 training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, env_id=env_id,
@@ -121,7 +119,7 @@ if __name__ == '__main__':
     # TODO parseargs
     # ray.init(ignore_reinit_error=True)
     try:
-        num_its_rl = 250  # 250
+        num_its_rl = 10  # 250
         batch_size = 8192
         reward_evolution(env_id="Walker2d-v4", num_iterations=5, max_timesteps_rl=num_its_rl*batch_size)
 

@@ -7,8 +7,8 @@ import time
 
 ENV_ID = "Walker2d-v4"
 TOTAL_TIMESTEPS = 3_000_000
-LOG_DIR = "../logs"
-MODEL_DIR = "../models"
+LOG_DIR = "../../logs_and_models/logs"
+MODEL_DIR = "../../logs_and_models/models"
 
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)

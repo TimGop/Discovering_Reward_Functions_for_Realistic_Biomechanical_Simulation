@@ -5,11 +5,11 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecNormalize
 import os
 import time
-from CustomRewardWrapper import CustomRewardWrapper, FlattenStatsWrapper
+from utils.CustomRewardWrapper import CustomRewardWrapper, FlattenStatsWrapper
 import functools
 import numpy as np
 import pandas as pd
-from Callbacks_sb3 import StatsCallback
+from utils.Callbacks.Callbacks_sb3 import StatsCallback
 
 
 def create_custom_reward_env(p_id, reward_func, ENV_ID):
@@ -44,10 +44,6 @@ def _finalize_single_stat(result):
 
 
 def process_callback_stats(episode_stats, n_steps, n_envs, reward_func_code, stat_frequency=1):
-    """
-    Replaces parse_sb3_monitor_logs.
-    Processes the list of dicts from the StatsCallback.
-    """
     stats = {
         "score": {"min": [], "mean": [], "max": []},
         "ep_lens": {"min": [], "mean": [], "max": []},
@@ -62,7 +58,6 @@ def process_callback_stats(episode_stats, n_steps, n_envs, reward_func_code, sta
 
     df = pd.DataFrame(episode_stats)
 
-    # Re-use the same batching logic as before
     batch_size_timesteps = n_steps * n_envs
     df['timesteps_cumsum'] = df['l'].cumsum()
     df['batch'] = (df['timesteps_cumsum'] - 1) // batch_size_timesteps
@@ -100,13 +95,12 @@ def train_ppo(p_id, reward_func, ENV_ID="Walker2d-v4", TOTAL_TIMESTEPS: int = 3_
     N_ENVS = 4
     N_STEPS = 2048
     # TODO register run stats like rllib version
-    LOG_DIR = "../logs"
-    MODEL_DIR = "../models"
+    LOG_DIR = "../../logs"
+    MODEL_DIR = "../../models"
 
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(MODEL_DIR, exist_ok=True)
 
-    # Unique filename for the model and environment stats
     timestamp = int(time.time())
     model_name = f"ppo_{ENV_ID}_{TOTAL_TIMESTEPS}_{timestamp}"
     MODEL_PATH = os.path.join(MODEL_DIR, model_name)
@@ -146,7 +140,6 @@ def train_ppo(p_id, reward_func, ENV_ID="Walker2d-v4", TOTAL_TIMESTEPS: int = 3_
         callback=stats_callback
     )
 
-    # --- 4. Save the Model and Environment Statistics ---
     print("training finished... saving model and environment stats...")
     model.save(MODEL_PATH)
     vec_env.save(STATS_PATH)

@@ -1,0 +1,82 @@
+
+params:
+  seed: 0
+
+  algo:
+    name: ppo
+
+  model:
+    name: continuous_a2c_logstd
+    network:
+      name: actor_critic
+      separate: True # Corresponds to vf_share_layers: False
+      space:
+        continuous:
+          mu_activation: None
+          sigma_activation: None
+          mu_init:
+            name: default
+          sigma_init:
+            name: const_initializer
+            val: 0
+          fixed_sigma: True
+      mlp:
+        units: [256, 128] # Corresponds to fcnet_hiddens
+        activation: elu # Use elu or tanh
+        init:
+          name: default
+
+  config:
+    name: WalkerMultiReward
+    env_name: isaacgym
+    # IMPORTANT: Set the number of "players" to your number of policies
+    player:
+      # This tells rl-games to train N separate policies.
+      # It will split the 'num_envs' among these players.
+      games_num: 2 # SET THIS TO THE NUMBER OF REWARD FUNCTIONS YOU ARE USING
+      num_actors: 2 # You can also specify actors per game if needed
+      is_determenistic: False
+
+    # This is the config for the VecTask class
+    env_config:
+      # The name we will register our custom task with
+      name: "MultiRewardWalker"
+      # num_envs must be a multiple of games_num
+      num_envs: 4096
+      # Asset details would go here, similar to other Isaac Gym examples
+      # For example:
+      asset:
+        assetRoot: "../../assets"
+        assetFileName: "mjcf/nv_humanoid.xml" # Or your Walker2d asset
+      # We will inject the reward functions list here from the training script
+
+    # PPO Hyperparameters matching your RLlib config
+    gamma: 0.99
+    lam: 0.95
+    e_clip: 0.2
+    entropy_coef: 0.0
+    lr: 3e-4
+    max_epochs: 1 # Number of training iterations
+    num_steps_per_episode: 0 # Not used for continuous tasks
+    normalize_input: True
+    normalize_value: True
+    truncate_grads: True
+    grad_norm: 1.0 # Corresponds to max_grad_norm
+
+    # Training batch settings
+    # Corresponds to n_steps in SB3 or rollout_fragment_length in RLlib
+    horizon_length: 32
+    minibatch_size: 1024 # train_batch_size / num_sgd_iter
+    num_actors: 4096 # Same as num_envs for on-policy
+
+    # Corresponds to n_epochs or num_sgd_iter
+    ppo_epochs: 5
+
+    # Total timesteps
+    max_frames: 3000000 # Your total_timesteps
+
+    # Logging and saving
+    score_to_win: 20000
+    save_best_after: 50
+    save_frequency: 100
+    print_stats: True
