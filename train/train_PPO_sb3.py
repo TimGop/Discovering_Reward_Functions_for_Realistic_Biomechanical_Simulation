@@ -24,7 +24,7 @@ def _finalize_single_stat(result):
     def safe_mean(lst):
         return np.mean(lst) if len(lst) > 0 else 0.0
 
-    if result["score"]["mean"]:  # Only finalize if we have data
+    if result["score"]["mean"]:  # only finalize if we have data
         result["score"]["value_list"] = result["score"]["mean"]
         result["score"]["mean"] = safe_mean(result["score"]["mean"])
         result["score"]["min"] = safe_mean(result["score"]["min"])
@@ -91,48 +91,50 @@ def process_callback_stats(episode_stats, n_steps, n_envs, reward_func_code, sta
     return _finalize_single_stat(stats)
 
 
-def train_ppo(p_id, reward_func, ENV_ID="Walker2d-v4", TOTAL_TIMESTEPS: int = 3_000_000, stat_frequency: int = 300):
-    N_ENVS = 4
-    N_STEPS = 2048
-    # TODO register run stats like rllib version
-    LOG_DIR = "../../logs"
-    MODEL_DIR = "../../models"
+def train_ppo(p_id, reward_func, args, stat_frequency: int):
+    ENV_ID = args.env_id
+    N_ENVS = args.n_envs
+    N_STEPS = args.n_steps
+    TOTAL_TIMESTEPS = args.n_rollouts * N_ENVS * N_STEPS
+    LOG_DIR = args.log_dir
+    MODEL_DIR = args.model_dir
 
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     timestamp = int(time.time())
-    model_name = f"ppo_{ENV_ID}_{TOTAL_TIMESTEPS}_{timestamp}"
+    model_name = f"ppo_{ENV_ID}_{p_id}_{TOTAL_TIMESTEPS}_{timestamp}"
     MODEL_PATH = os.path.join(MODEL_DIR, model_name)
     STATS_PATH = os.path.join(MODEL_DIR, f"{model_name}_vecnormalize.pkl")
 
-    print(f"creating vectorized environment for {ENV_ID}...")
+    print(f"[{p_id}] creating vectorized environment for {ENV_ID}...")
     custom_reward_creation_func = functools.partial(create_custom_reward_env, p_id, reward_func, ENV_ID)
-    vec_env = make_vec_env(custom_reward_creation_func, n_envs=N_ENVS, seed=0)
+    vec_env = make_vec_env(custom_reward_creation_func, n_envs=N_ENVS, seed=args.vec_env_seed)
 
-    print("normalizing the environment...")
-    vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.)
+    print(f"[{p_id}] normalizing the environment...")
+    vec_env = VecNormalize(vec_env, norm_obs=args.vec_env_norm_obs, norm_reward=args.vec_env_norm_reward,
+                           clip_obs=args.vec_env_clip_obs)
 
-    print("defining the PPO model...")
+    print(f"[{p_id}] defining the PPO model...")
     model = PPO(
         "MlpPolicy",
         vec_env,
         verbose=1,
         tensorboard_log=LOG_DIR,
-        learning_rate=3e-4,
+        learning_rate=args.ppo_learning_rate,
         n_steps=N_STEPS,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        ent_coef=0.0,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
+        batch_size=args.ppo_batch_size,
+        n_epochs=args.ppo_n_epochs,
+        gamma=args.ppo_gamma,
+        gae_lambda=args.ppo_gae_lambda,
+        clip_range=args.ppo_clip_range,
+        ent_coef=args.ppo_ent_coef,
+        vf_coef=args.ppo_vf_coef,
+        max_grad_norm=args.ppo_max_grad_norm,
     )
     stats_callback = StatsCallback()
 
-    print(f"starting training for {TOTAL_TIMESTEPS} timesteps...")
+    print(f"[{p_id}] starting training for {TOTAL_TIMESTEPS} timesteps...")
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         progress_bar=True,
@@ -140,20 +142,20 @@ def train_ppo(p_id, reward_func, ENV_ID="Walker2d-v4", TOTAL_TIMESTEPS: int = 3_
         callback=stats_callback
     )
 
-    print("training finished... saving model and environment stats...")
+    print(f"[{p_id}] training finished... saving model and environment stats...")
     model.save(MODEL_PATH)
     vec_env.save(STATS_PATH)
     vec_env.close()
 
-    print(f"model saved to: {MODEL_PATH}.zip")
-    print(f"environment stats saved to: {STATS_PATH}")
-    print("parsing monitor logs...")
+    print(f"[{p_id}] model saved to: {MODEL_PATH}.zip")
+    print(f"[{p_id}] environment stats saved to: {STATS_PATH}")
+    print(f"[{p_id}] parsing monitor logs...")
 
     code_str = ""
     if hasattr(reward_func, 'code_string'):
         code_str = reward_func.code_string
     else:
-        print("warning: reward_func has no 'code_string' attribute. Saving empty code.")
+        print(f"[{p_id}] warning: reward_func has no 'code_string' attribute. Saving empty code.")
 
     stats = process_callback_stats(
         stats_callback.episode_stats,
@@ -163,13 +165,14 @@ def train_ppo(p_id, reward_func, ENV_ID="Walker2d-v4", TOTAL_TIMESTEPS: int = 3_
         stat_frequency=stat_frequency
     )
 
-    print("--- training Complete ---")
+    print(f"--- [{p_id}] training Complete ---")
     return stats
 
 
-def train_sb3_sequnetial_policies(reward_funcs, env_id, max_its, stat_frequency: int = 300):
+def train_sb3_sequnetial_policies(reward_funcs, args, stat_frequency: int):
     all_stats = []
     for idx, reward_func in enumerate(reward_funcs):
-        stats = train_ppo(idx, reward_func, ENV_ID=env_id, TOTAL_TIMESTEPS=max_its, stat_frequency=stat_frequency)
+        print(f"\n--- Training Policy {idx + 1}/{len(reward_funcs)} ---")
+        stats = train_ppo(idx, reward_func, args=args, stat_frequency=stat_frequency)
         all_stats.append(stats)
     return all_stats
