@@ -130,8 +130,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evolve reward functions using PPO and GPT.")
 
     # --- Library ---
-    parser.add_argument("--library", type=str, default="stable_baselines_3", help="stable baselines 3 or ray.rllib"
-                        , choices=["stable_baselines_3", "ray_rllib"])
+    parser.add_argument("--library", type=str, default="stable_baselines_3",
+                        help="stable baselines 3 or ray.rllib", choices=["stable_baselines_3", "ray_rllib"])
 
     # Note: args below are only for sb3 implementation (aside from env_id)
     # sb3 delivers more stable performant learning vs rllib ppo implementation (rllib is faster per episode multipolicy)
