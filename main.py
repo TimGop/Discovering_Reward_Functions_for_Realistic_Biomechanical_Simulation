@@ -1,18 +1,14 @@
-# from train_PPO_parallel import train_rllib_multi_policy
+from train.train_PPO_parallel import train_rllib_multi_policy
 import argparse
-
 from train.train_PPO_sb3 import train_sb3_sequnetial_policies
 from utils.utils import (ChatSession, parse_and_validate_code_blocks)
-# save_string_to_file, load_string_from_file,
 from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1,
                                                 rew_reflection_2, walker_2d_v4_description,
                                                 reward_func_context, code_formatting_tip_bonus,
-                                                init_user_prompt)  # ,pre_env
+                                                init_user_prompt)
 from utils.prompts_and_env_code.environment_code import walker_2d_v4_code
 from utils.CustomRewardWrapper import RewardFunctionWrapper
-
-
-# import ray
+import ray
 
 
 def get_funcs(env_id, gpt, messages, num_funcs=16):
@@ -93,21 +89,20 @@ def reward_evolution(alg_args):
                                           task_description=walker_2d_v4_description)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
 
-    print(f"Running iteration 1 of reward iteration process...")
-    reward_funcs = get_funcs(env_id=alg_args.env_id, gpt=gpt, messages=messages,
-                             num_funcs=alg_args.num_funcs_per_iteration)
-
     for iteration in range(alg_args.num_iterations):
-        if iteration > 0:
-            print(f"Running iteration {iteration + 1} of reward iteration process...")
-            reward_funcs = get_funcs(env_id=alg_args.env_id, gpt=gpt, messages=messages,
-                                     num_funcs=alg_args.num_funcs_per_iteration)
+        print(f"Running iteration {iteration + 1} of reward iteration process...")
+        reward_funcs = get_funcs(env_id=alg_args.env_id, gpt=gpt, messages=messages,
+                                 num_funcs=alg_args.num_funcs_per_iteration)
 
         while True:
             try:
-                training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs,
-                                                                 args=alg_args,
-                                                                 stat_frequency=epoch_stat_freq)
+                if alg_args.library == "stable_baselines_3":
+                    training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, args=alg_args,
+                                                                     stat_frequency=epoch_stat_freq)
+                else:
+                    training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
+                                                                env_id=alg_args.env_id, stat_frequency=300,
+                                                                max_iterations=3_000)
                 break
             except Exception as e:
                 print(f"Training failed with exception: {e}")
@@ -118,21 +113,33 @@ def reward_evolution(alg_args):
 
 
 def main(alg_args):
-    # ray.init(ignore_reinit_error=True)
+    if alg_args.library == "ray_rllib":
+        print("training with rllib...")
+        ray.init(ignore_reinit_error=True)
+    else:
+        print("training with sb3...")
     try:
         reward_evolution(alg_args)
     finally:
         print("eureka done...")
-        # ray.shutdown()
+        if alg_args.library == "ray_rllib":
+            ray.shutdown()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evolve reward functions using PPO and GPT.")
 
+    # --- Library ---
+    parser.add_argument("--library", type=str, default="stable_baselines_3", help="stable baselines 3 or ray.rllib"
+                        , choices=["stable_baselines_3", "ray_rllib"])
+
+    # Note: args below are only for sb3 implementation (aside from env_id)
+    # sb3 delivers more stable performant learning vs rllib ppo implementation (rllib is faster per episode multipolicy)
+
     # --- Evolution Loop Parameters ---
     parser.add_argument("--env_id", type=str, default="Walker2d-v4", help="Gymnasium environment ID")
     parser.add_argument("--num_iterations", type=int, default=5, help="Number of reward evolution iterations")
-    parser.add_argument("--gpt_model", type=str, default="gpt-5",
+    parser.add_argument("--gpt_model", type=str, default="gpt-5-nano-2025-08-07",
                         choices=["gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5"],
                         help="GPT model name for ChatSession")
     parser.add_argument("--num_funcs_per_iteration", type=int, default=16,

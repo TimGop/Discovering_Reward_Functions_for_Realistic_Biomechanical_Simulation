@@ -12,6 +12,7 @@ EXPECTED_NAME = "custom_reward_fn"
 EXPECTED_PARAMS = ["observation", "action", "original_reward", "next_observation", "terminated", "truncated"]
 EXPECTED_RETURN_TYPE = Tuple[torch.Tensor, Dict[str, torch.Tensor]]
 
+
 class ChatSession:
     def __init__(self, model="gpt-5-nano-2025-08-07"):
         if not os.getenv("OPENAI_API_KEY"):
