@@ -161,7 +161,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     print(f"[{p_id}] parsing monitor logs...")
 
     full_string = ""
-    if hasattr(reward_func, 'code_string'):
+    if hasattr(reward_func, 'full_string'):
         full_string = reward_func.full_string
     else:
         print(f"[{p_id}] warning: reward_func has no 'code_string' attribute. Saving empty code.")
