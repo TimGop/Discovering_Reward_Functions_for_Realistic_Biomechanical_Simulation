@@ -6,7 +6,7 @@ import os
 import time
 
 ENV_ID = "Walker2d-v4"
-TOTAL_TIMESTEPS = 3_000_000
+TOTAL_TIMESTEPS = 2_000_000
 LOG_DIR = "../../logs_and_models/logs"
 MODEL_DIR = "../../logs_and_models/models"
 

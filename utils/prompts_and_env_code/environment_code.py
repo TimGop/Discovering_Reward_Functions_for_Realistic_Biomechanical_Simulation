@@ -4,9 +4,6 @@ walker_2d_v4_code = """class Walker2dEnv(MujocoEnv, utils.EzPickle):
 
     def __init__(
         self,
-        forward_reward_weight=1.0,
-        ctrl_cost_weight=1e-3,
-        healthy_reward=1.0,
         terminate_when_unhealthy=True,
         healthy_z_range=(0.8, 2.0),
         healthy_angle_range=(-1.0, 1.0),
@@ -15,10 +12,6 @@ walker_2d_v4_code = """class Walker2dEnv(MujocoEnv, utils.EzPickle):
         **kwargs,
     ):
 
-        self._forward_reward_weight = forward_reward_weight
-        self._ctrl_cost_weight = ctrl_cost_weight
-
-        self._healthy_reward = healthy_reward
         self._terminate_when_unhealthy = terminate_when_unhealthy
 
         self._healthy_z_range = healthy_z_range
@@ -38,10 +31,6 @@ walker_2d_v4_code = """class Walker2dEnv(MujocoEnv, utils.EzPickle):
             observation_space = Box(
                 low=-np.inf, high=np.inf, shape=(18,), dtype=np.float64
             )
-
-    def control_cost(self, action):
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
-        return control_cost
 
     @property
     def is_healthy(self):
@@ -76,17 +65,10 @@ walker_2d_v4_code = """class Walker2dEnv(MujocoEnv, utils.EzPickle):
         self.do_simulation(action, self.frame_skip)
         x_position_after = self.data.qpos[0]
         x_velocity = (x_position_after - x_position_before) / self.dt
-
-        ctrl_cost = self.control_cost(action)
-
-        forward_reward = self._forward_reward_weight * x_velocity
-        healthy_reward = self.healthy_reward
-
-        rewards = forward_reward + healthy_reward
-        costs = ctrl_cost
-
+        
+        # --- REWARD CALCULATION IS HIDDEN ---
+        
         observation = self._get_obs()
-        reward = rewards - costs
         terminated = self.terminated
         info = {
             "x_position": x_position_after,
