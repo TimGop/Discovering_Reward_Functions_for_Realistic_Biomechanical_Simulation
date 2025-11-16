@@ -1,3 +1,5 @@
+import multiprocessing
+
 import gymnasium as gym
 from gymnasium.wrappers import RecordEpisodeStatistics
 from stable_baselines3 import PPO
@@ -24,22 +26,28 @@ def _finalize_single_stat(result):
     def safe_mean(lst):
         return np.mean(lst) if len(lst) > 0 else 0.0
 
+    def safe_min(lst):
+        return np.min(lst) if len(lst) > 0 else 0.0
+
+    def safe_max(lst):
+        return np.max(lst) if len(lst) > 0 else 0.0
+
     if result["score"]["mean"]:  # only finalize if we have data
         result["score"]["value_list"] = result["score"]["mean"]
         result["score"]["mean"] = safe_mean(result["score"]["mean"])
-        result["score"]["min"] = safe_mean(result["score"]["min"])
-        result["score"]["max"] = safe_mean(result["score"]["max"])
+        result["score"]["min"] = safe_min(result["score"]["min"])
+        result["score"]["max"] = safe_max(result["score"]["max"])
 
         result["ep_lens"]["value_list"] = result["ep_lens"]["mean"]
         result["ep_lens"]["mean"] = safe_mean(result["ep_lens"]["mean"])
-        result["ep_lens"]["min"] = safe_mean(result["ep_lens"]["min"])
-        result["ep_lens"]["max"] = safe_mean(result["ep_lens"]["max"])
+        result["ep_lens"]["min"] = safe_min(result["ep_lens"]["min"])
+        result["ep_lens"]["max"] = safe_max(result["ep_lens"]["max"])
 
         for key in result["reward_components"]:
             result["reward_components"][key]["value_list"] = result["reward_components"][key]["mean"]
             result["reward_components"][key]["mean"] = safe_mean(result["reward_components"][key]["mean"])
-            result["reward_components"][key]["min"] = safe_mean(result["reward_components"][key]["min"])
-            result["reward_components"][key]["max"] = safe_mean(result["reward_components"][key]["max"])
+            result["reward_components"][key]["min"] = safe_min(result["reward_components"][key]["min"])
+            result["reward_components"][key]["max"] = safe_max(result["reward_components"][key]["max"])
     return result
 
 
@@ -131,6 +139,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
         ent_coef=args.ppo_ent_coef,
         vf_coef=args.ppo_vf_coef,
         max_grad_norm=args.ppo_max_grad_norm,
+        device='cpu'   # sb3 ppo made to train on cpu (actually faster)
     )
     stats_callback = StatsCallback()
 
@@ -151,9 +160,9 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     print(f"[{p_id}] environment stats saved to: {STATS_PATH}")
     print(f"[{p_id}] parsing monitor logs...")
 
-    code_str = ""
+    full_string = ""
     if hasattr(reward_func, 'code_string'):
-        code_str = reward_func.code_string
+        full_string = reward_func.full_string
     else:
         print(f"[{p_id}] warning: reward_func has no 'code_string' attribute. Saving empty code.")
 
@@ -161,7 +170,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
         stats_callback.episode_stats,
         n_steps=N_STEPS,
         n_envs=N_ENVS,
-        reward_func_code=code_str,
+        reward_func_code=full_string,
         stat_frequency=stat_frequency
     )
 
@@ -169,10 +178,26 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     return stats
 
 
-def train_sb3_sequnetial_policies(reward_funcs, args, stat_frequency: int):
-    all_stats = []
+def train_sb3_parallel_policies(reward_funcs, args, stat_frequency: int):
+    """
+    Trains multiple PPO policies in parallel using multiprocessing.
+    """
+    num_workers = args.num_parallel_trains
+
+    # create a list of arguments for each train_ppo call
+    # each item is a tuple: (p_id, reward_func, args, stat_frequency)
+    tasks = []
     for idx, reward_func in enumerate(reward_funcs):
-        print(f"\n--- Training Policy {idx + 1}/{len(reward_funcs)} ---")
-        stats = train_ppo(idx, reward_func, args=args, stat_frequency=stat_frequency)
-        all_stats.append(stats)
+        tasks.append((idx, reward_func, args, stat_frequency))
+
+    print(f"\n--- Training {len(reward_funcs)} Policies ({num_workers} in Parallel at a time) ---")
+
+    # use 'spawn' start method for CUDA safety. This is crucial!
+    ctx = multiprocessing.get_context("spawn")
+
+    with ctx.Pool(processes=num_workers) as pool:
+        # use starmap to pass the tuples of arguments to train_ppo
+        all_stats = pool.starmap(train_ppo, tasks)
+
+    print(f"--- All {len(all_stats)} Parallel Training Jobs Complete ---")
     return all_stats

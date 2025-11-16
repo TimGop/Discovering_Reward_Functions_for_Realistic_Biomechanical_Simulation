@@ -1,6 +1,6 @@
 from train.train_PPO_parallel import train_rllib_multi_policy
 import argparse
-from train.train_PPO_sb3 import train_sb3_sequnetial_policies
+from train.train_PPO_sb3 import train_sb3_parallel_policies
 from utils.utils import (ChatSession, parse_and_validate_code_blocks)
 from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1,
                                                 rew_reflection_2, walker_2d_v4_description,
@@ -15,9 +15,12 @@ def get_funcs(env_id, gpt, messages, num_funcs=16):
     reward_funcs = []
     while len(reward_funcs) < num_funcs:
         reward_string = gpt.ask(messages=messages)
-        reward_funcs += [RewardFunctionWrapper(string)
-                         for string in parse_and_validate_code_blocks(env_id, reward_string)]
-    assert len(reward_funcs) > 0
+        reward_str_list, full_str = parse_and_validate_code_blocks(env_id, reward_string)
+        if len(reward_str_list) > 1:
+            print("Multiple valid reward functions detected in single llm output..."
+                  " Will ignore this iteration...")
+        elif len(reward_str_list) == 1:
+            reward_funcs += [RewardFunctionWrapper(reward_str_list[0], full_str)]
     return reward_funcs
 
 
@@ -58,7 +61,8 @@ def get_reflection(training_results, messages, epoch_freq):
                          + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
                          code_formatting_tip_bonus)
 
-    print("\n\n"+reflection_string+"\n\n")
+    print("\n\n" + best_code_string + "\n\n")
+    print("\n\n" + reflection_string + "\n\n")
 
     if len(messages) == 2:
         messages += [{"role": "assistant", "content": best_code_string}]
@@ -82,9 +86,9 @@ def reward_evolution(alg_args):
 
     gpt = ChatSession(model=alg_args.gpt_model)
 
-    sys_prompt = (
-            init_sys_prompt + "\n" + reward_func_context + "\n" + code_formatting_tip + "\n"
-            + code_formatting_tip_bonus)
+    sys_prompt = (init_sys_prompt + "\n" + reward_func_context + "\n" + code_formatting_tip)
+    #  + "\n" + code_formatting_tip_bonus
+
     user_prompt = init_user_prompt.format(task_obs_code_string=walker_2d_v4_code,
                                           task_description=walker_2d_v4_description)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
@@ -97,8 +101,8 @@ def reward_evolution(alg_args):
         while True:
             try:
                 if alg_args.library == "stable_baselines_3":
-                    training_results = train_sb3_sequnetial_policies(reward_funcs=reward_funcs, args=alg_args,
-                                                                     stat_frequency=epoch_stat_freq)
+                    training_results = train_sb3_parallel_policies(reward_funcs=reward_funcs, args=alg_args,
+                                                                   stat_frequency=epoch_stat_freq)
                 else:
                     training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
                                                                 env_id=alg_args.env_id, stat_frequency=300,
@@ -139,10 +143,10 @@ if __name__ == '__main__':
     # --- Evolution Loop Parameters ---
     parser.add_argument("--env_id", type=str, default="Walker2d-v4", help="Gymnasium environment ID")
     parser.add_argument("--num_iterations", type=int, default=5, help="Number of reward evolution iterations")
-    parser.add_argument("--gpt_model", type=str, default="gpt-5-nano-2025-08-07",
-                        choices=["gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5"],
+    parser.add_argument("--gpt_model", type=str, default="gpt-5",
+                        choices=["gpt-4", "gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5"],
                         help="GPT model name for ChatSession")
-    parser.add_argument("--num_funcs_per_iteration", type=int, default=16,
+    parser.add_argument("--num_funcs_per_iteration", type=int, default=4,
                         help="Number of reward functions to generate per iteration")
 
     # --- RL Training Parameters ---
@@ -178,6 +182,10 @@ if __name__ == '__main__':
     parser.add_argument("--vec_env_norm_reward", type=bool, default=True, help="normalize rewards in env")
     parser.add_argument("--vec_env_clip_obs", type=float, default=10.0, help="observation clipping param")
     parser.add_argument("--vec_env_seed", type=int, default=0, help="initial random seed for env")
+
+    # --- Multiprocessing parameters ---
+    parser.add_argument("--num_parallel_trains", type=int, default=2,
+                        help="Number of PPO training processes to run in parallel.")
 
     args = parser.parse_args()
 

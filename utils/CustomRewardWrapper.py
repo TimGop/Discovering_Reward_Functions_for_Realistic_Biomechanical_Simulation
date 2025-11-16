@@ -30,17 +30,16 @@ class CustomRewardWrapper(gym.Wrapper):
         return observation_np, info
 
     def step(self, action):
-        observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
+        observation_np, _, terminated_np, truncated_np, info = self.env.step(action)
 
         observation = torch.as_tensor(self.current_observation, dtype=torch.float32)
         next_observation = torch.as_tensor(observation_np, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
-        original_reward = torch.as_tensor(original_reward_np, dtype=torch.float32)
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
         new_reward, reward_components = self.custom_reward_fn(
-            observation, action, original_reward, next_observation, terminated, truncated
+            observation, action, next_observation, terminated, truncated
         )
 
         self.current_observation = observation_np
@@ -210,8 +209,9 @@ def compile_func_from_string(
 
 
 class RewardFunctionWrapper:
-    def __init__(self, code_string: str):
+    def __init__(self, code_string: str, full_string: str):
         self.code_string = code_string
+        self.full_string = full_string
         self._compiled_func = None
 
     def __call__(self, *args, **kwargs):

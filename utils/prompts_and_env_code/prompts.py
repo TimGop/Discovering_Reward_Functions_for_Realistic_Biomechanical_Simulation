@@ -9,7 +9,7 @@ Your reward function should use useful variables from the environment as inputs.
 the reward function signature can be:
 ‘‘‘
 @torch.jit.script
-def custom_reward_fn(observation, action, original_reward, next_observation, terminated, truncated)
+def custom_reward_fn(observation, action, next_observation, terminated, truncated)
  -> Tuple[torch.Tensor,Dict[str, torch.Tensor]]:
 ...
 return reward, {}‘‘‘
@@ -21,21 +21,19 @@ Make sure any new tensor or variable you introduce is on the same device as the 
 reward_func_context = """Note that the reward function will be called in the following context in a wrapper class that 
 overrides the original step method of an environment to implement its own custom reward function:
             def step(self, action):
-        observation_np, original_reward_np, terminated_np, truncated_np, info = self.env.step(action)
+        observation_np, _, terminated_np, truncated_np, info = self.env.step(action)
         
         observation = torch.as_tensor(self.current_observation, dtype=torch.float32)
         next_observation = torch.as_tensor(observation_np, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
-        original_reward = torch.as_tensor(original_reward_np, dtype=torch.float32)
         terminated = torch.as_tensor(terminated_np, dtype=torch.bool)
         truncated = torch.as_tensor(truncated_np, dtype=torch.bool)
 
         new_reward, reward_components = self.custom_reward_fn(
-            observation, action, original_reward, next_observation, terminated, truncated
+            observation, action, next_observation, terminated, truncated
         )
         # rest of step function code...
         return observation_np, new_reward.cpu().numpy(), terminated_np, truncated_np, info"""
-pre_env = """Below is the code for the environment:"""
 code_formatting_tip = """The output of a reward function should consist of two items:
 (1) the total reward,
 (2) a dictionary of each individual reward component.
@@ -61,10 +59,7 @@ code_formatting_tip_bonus = """When generating the reward function, follow this 
 The final reward must NOT be the sum of the original_reward and a function of the original_reward 
 (i.e., avoid reward = base + f(base)). Instead, use one of these two stable patterns:
 Reward Replacement: Create a new reward value by applying a bounded function to the original reward 
-(e.g., final_reward = torch.tanh(original_reward) + action_penalty).
-Independent Addition: Add or subtract terms that depend on the action or observation, not the original_reward itself 
-(e.g., final_reward = original_reward - 0.01 * torch.norm(action))."""
-num_rew_funcs_directive = """Please design 16 seperate reward functions."""
+(e.g., final_reward = torch.tanh(original_reward) + action_penalty)."""
 rew_reflection_1 = """We trained a RL policy using the provided reward function code and tracked the values of the
 individual components in the reward function as well as global policy metrics such as
 fitness scores and episode lengths after every {epoch_freq} epochs and the maximum, mean,

@@ -9,7 +9,7 @@ import torch
 import inspect
 
 EXPECTED_NAME = "custom_reward_fn"
-EXPECTED_PARAMS = ["observation", "action", "original_reward", "next_observation", "terminated", "truncated"]
+EXPECTED_PARAMS = ["observation", "action", "next_observation", "terminated", "truncated"]
 EXPECTED_RETURN_TYPE = Tuple[torch.Tensor, Dict[str, torch.Tensor]]
 
 
@@ -39,7 +39,7 @@ class ChatSession:
         return reply
 
 
-def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None) -> List[str]:
+def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None) -> Tuple[List[str], str]:
     if required_imports is None:
         required_imports = ["import torch", "from typing import Tuple", "from typing import Dict"]
 
@@ -54,6 +54,8 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
         r'```(.*?)```',
     ]
     combined_pattern = re.compile("|".join(patterns), re.DOTALL)
+
+    # print("\n\ntext blob:\n"+text_blob+"\n")
 
     code_blocks = []
     for match in combined_pattern.finditer(text_blob):
@@ -91,18 +93,17 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
             temp_env = gym.make(env_id)
             obs_np, info = temp_env.reset()
             action_np = temp_env.action_space.sample()
-            next_obs_np, reward_np, terminated, truncated, info = temp_env.step(action_np)
+            next_obs_np, _, terminated, truncated, info = temp_env.step(action_np)
             temp_env.close()
 
             obs_tensor = torch.as_tensor(obs_np, dtype=torch.float32)
             next_obs_tensor = torch.as_tensor(next_obs_np, dtype=torch.float32)
             act_tensor = torch.as_tensor(action_np, dtype=torch.float32)
-            rew_tensor = torch.as_tensor(reward_np, dtype=torch.float32)
             term_tensor = torch.as_tensor(terminated, dtype=torch.bool)
             trunc_tensor = torch.as_tensor(truncated, dtype=torch.bool)
 
             new_reward, components = function_jit(
-                obs_tensor, act_tensor, rew_tensor, next_obs_tensor, term_tensor, trunc_tensor
+                obs_tensor, act_tensor, next_obs_tensor, term_tensor, trunc_tensor
             )
             assert components
 
@@ -130,7 +131,7 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
             print("-" * 20)
 
     print(f"Validation complete. Found {len(valid_code_strings)} valid functions.\n")
-    return valid_code_strings
+    return valid_code_strings, text_blob
 
 
 def save_string_to_file(filepath, content):
