@@ -2,11 +2,18 @@ import openai
 import os
 from openai import OpenAI
 import gymnasium as gym
-from utils.CustomRewardWrapper import compile_func_from_string
+from gymnasium.wrappers import RecordEpisodeStatistics
+from .CustomRewardWrapper import compile_func_from_string, CustomRewardWrapper, FlattenStatsWrapper, \
+    RewardFunctionWrapper
 import re
 from typing import List, Tuple, Dict
 import torch
 import inspect
+import numpy as np
+import pandas as pd
+
+from .prompts_and_env_code.prompts import rew_reflection_1, rew_reflection_2, code_formatting_tip_bonus, \
+    code_formatting_tip
 
 EXPECTED_NAME = "custom_reward_fn"
 EXPECTED_PARAMS = ["observation", "action", "next_observation", "terminated", "truncated"]
@@ -37,6 +44,19 @@ class ChatSession:
             return f"An unexpected error occurred: {e}"
 
         return reply
+
+
+def get_funcs(env_id, gpt, messages, num_funcs=16):
+    reward_funcs = []
+    while len(reward_funcs) < num_funcs:
+        reward_string = gpt.ask(messages=messages)
+        reward_str_list, full_str = parse_and_validate_code_blocks(env_id, reward_string)
+        if len(reward_str_list) > 1:
+            print("Multiple valid reward functions detected in single llm output..."
+                  " Will ignore this iteration...")
+        elif len(reward_str_list) == 1:
+            reward_funcs += [RewardFunctionWrapper(reward_str_list[0], full_str)]
+    return reward_funcs
 
 
 def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None) -> Tuple[List[str], str]:
@@ -134,6 +154,57 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
     return valid_code_strings, text_blob
 
 
+def get_reflection(training_results, messages, epoch_freq):
+    best_index = None
+    max_fitness = float("-inf")
+    for idx, result in enumerate(training_results):
+        curr_max_fitness = result["score"]["max"]
+        if curr_max_fitness > max_fitness:
+            max_fitness = curr_max_fitness
+            best_index = idx
+
+    assert best_index is not None  # not None
+    best_result = training_results[best_index]
+    separator = "\n"
+    key_val_format = "{k}: {v}, max: {max}, mean: {mean}, min: {min}"
+
+    reward_component_string = separator.join(key_val_format.format(k=k, v=str(dictionary["value_list"]),
+                                                                   max=dictionary["max"], mean=dictionary["mean"],
+                                                                   min=dictionary["min"])
+                                             for k, dictionary in best_result["reward_components"].items())
+
+    fitness_and_ep_lens_string = separator.join(
+        [key_val_format.format(k="fitness score", v=best_result["score"]["value_list"],
+                               max=best_result["score"]["max"],
+                               mean=best_result["score"]["mean"],
+                               min=best_result["score"]["min"]),
+         key_val_format.format(k="episode lengths",
+                               v=best_result["ep_lens"]["value_list"],
+                               max=best_result["ep_lens"]["max"],
+                               mean=best_result["ep_lens"]["mean"],
+                               min=best_result["ep_lens"]["min"])
+         ])
+
+    best_code_string = best_result["code"]
+
+    reflection_string = (rew_reflection_1.format(epoch_freq=epoch_freq) + "\n" + reward_component_string + "\n"
+                         + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
+                         code_formatting_tip_bonus)
+
+    print("\n\n" + best_code_string + "\n\n")
+    print("\n\n" + reflection_string + "\n\n")
+
+    if len(messages) == 2:
+        messages += [{"role": "assistant", "content": best_code_string}]
+        messages += [{"role": "user", "content": reflection_string}]
+    else:
+        assert len(messages) == 4
+        messages[-2] = {"role": "assistant", "content": best_code_string}
+        messages[-1] = {"role": "user", "content": reflection_string}
+
+    return messages
+
+
 def save_string_to_file(filepath, content):
     try:
         # 'w' mode opens the file for writing.
@@ -160,3 +231,88 @@ def load_string_from_file(filepath):
     except IOError as e:
         print(f"Error: Could not read from file '{filepath}'. Reason: {e}")
         return None
+
+
+def create_custom_reward_env(p_id, reward_func, ENV_ID):
+    base_env = gym.make(ENV_ID)
+    env = CustomRewardWrapper(base_env, reward_func, p_id)
+    env = FlattenStatsWrapper(env)
+    env = RecordEpisodeStatistics(env)
+    return env
+
+
+def finalize_single_stat(result):
+    def safe_mean(lst):
+        return np.mean(lst) if len(lst) > 0 else 0.0
+
+    def safe_min(lst):
+        return np.min(lst) if len(lst) > 0 else 0.0
+
+    def safe_max(lst):
+        return np.max(lst) if len(lst) > 0 else 0.0
+
+    if result["score"]["mean"]:
+        result["score"]["value_list"] = result["score"]["mean"]
+        result["score"]["mean"] = safe_mean(result["score"]["mean"])
+        result["score"]["min"] = safe_min(result["score"]["min"])
+        result["score"]["max"] = safe_max(result["score"]["max"])
+
+        result["ep_lens"]["value_list"] = result["ep_lens"]["mean"]
+        result["ep_lens"]["mean"] = safe_mean(result["ep_lens"]["mean"])
+        result["ep_lens"]["min"] = safe_min(result["ep_lens"]["min"])
+        result["ep_lens"]["max"] = safe_max(result["ep_lens"]["max"])
+
+        for key in result["reward_components"]:
+            result["reward_components"][key]["value_list"] = result["reward_components"][key]["mean"]
+            result["reward_components"][key]["mean"] = safe_mean(result["reward_components"][key]["mean"])
+            result["reward_components"][key]["min"] = safe_min(result["reward_components"][key]["min"])
+            result["reward_components"][key]["max"] = safe_max(result["reward_components"][key]["max"])
+    return result
+
+
+def process_callback_stats(episode_stats, n_steps, n_envs, reward_func_code, stat_frequency=1):
+    stats = {
+        "score": {"min": [], "mean": [], "max": []},
+        "ep_lens": {"min": [], "mean": [], "max": []},
+        "reward_components": {},
+        "error": None,
+        "code": reward_func_code
+    }
+
+    if not episode_stats:
+        print("Warning: No episode stats were collected by the callback.")
+        return finalize_single_stat(stats)
+
+    df = pd.DataFrame(episode_stats)
+
+    batch_size_timesteps = n_steps * n_envs
+    df['timesteps_cumsum'] = df['l'].cumsum()
+    df['batch'] = (df['timesteps_cumsum'] - 1) // batch_size_timesteps
+
+    reward_component_cols = [col for col in df.columns if col.startswith("reward_components/")]
+
+    if 'fitness_score' not in df.columns:
+        print(f"Warning: 'fitness_score' not found in callback stats. Check wrappers.")
+        return finalize_single_stat(stats)
+
+    grouped = df.groupby('batch')
+    for batch_idx, batch_df in grouped:
+        # Note: will crash if batch_idx not an integer
+        if int(batch_idx) % stat_frequency == 0:
+            stats["score"]["min"].append(batch_df['fitness_score'].min())
+            stats["score"]["mean"].append(batch_df['fitness_score'].mean())
+            stats["score"]["max"].append(batch_df['fitness_score'].max())
+
+            len_col = 'episode_length' if 'episode_length' in batch_df.columns else 'l'
+            stats["ep_lens"]["min"].append(batch_df[len_col].min())
+            stats["ep_lens"]["mean"].append(batch_df[len_col].mean())
+            stats["ep_lens"]["max"].append(batch_df[len_col].max())
+
+            for col_name in reward_component_cols:
+                key = col_name.split('/')[-1]
+                component_dict = stats["reward_components"].setdefault(key, {})
+                component_dict.setdefault("min", []).append(batch_df[col_name].min())
+                component_dict.setdefault("mean", []).append(batch_df[col_name].mean())
+                component_dict.setdefault("max", []).append(batch_df[col_name].max())
+
+    return finalize_single_stat(stats)

@@ -78,9 +78,3 @@ its value to a proper range
 Please analyze each existing reward component in the suggested manner above first, and then
 write the reward function code.
 """
-
-walker_2d_v4_description = """The walker is a two-dimensional two-legged figure that consist of seven main body parts 
-- a single torso at the top (with the two legs splitting after the torso), two thighs in the middle below the torso, 
-two legs in the bottom below the thighs, and two feet attached to the legs on which the entire body rests. The goal 
-is to walk in the in the forward (right) direction by applying torques on the six hinges connecting the seven body 
-parts."""

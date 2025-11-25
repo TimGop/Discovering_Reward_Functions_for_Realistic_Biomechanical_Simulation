@@ -1,17 +1,27 @@
 import multiprocessing
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import VecNormalize
 import os
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
 import time
 import functools
+
+# SBX / SB3 Imports
+from sbx import SAC
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import VecNormalize
+
+# custom Utils
 from utils.Callbacks.Callbacks_sb3 import StatsCallback
 from utils.utils import create_custom_reward_env, process_callback_stats
 
 
-def train_ppo(p_id, reward_func, args, stat_frequency: int):
+def train_sac(p_id, reward_func, args, stat_frequency: int):
     ENV_ID = args.env_id
     N_ENVS = args.n_envs
+    # SAC is off-policy and doesn't strictly use n_steps for updates,
+    # but we use it here to calculate total duration and stats aggregation.
     N_STEPS = args.n_steps
     TOTAL_TIMESTEPS = args.n_rollouts * N_ENVS * N_STEPS
     LOG_DIR = args.log_dir
@@ -21,7 +31,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     timestamp = int(time.time())
-    model_name = f"ppo_{ENV_ID}_{p_id}_{TOTAL_TIMESTEPS}_{timestamp}"
+    model_name = f"sac_{ENV_ID}_{p_id}_{TOTAL_TIMESTEPS}_{timestamp}"
     MODEL_PATH = os.path.join(MODEL_DIR, model_name)
     STATS_PATH = os.path.join(MODEL_DIR, f"{model_name}_vecnormalize.pkl")
 
@@ -30,27 +40,49 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     vec_env = make_vec_env(custom_reward_creation_func, n_envs=N_ENVS, seed=args.vec_env_seed)
 
     print(f"[{p_id}] normalizing the environment...")
+    # Note: SAC often works well without normalization, but we keep it to match ppo workflow
     vec_env = VecNormalize(vec_env, norm_obs=args.vec_env_norm_obs, norm_reward=args.vec_env_norm_reward,
                            clip_obs=args.vec_env_clip_obs)
 
-    print(f"[{p_id}] defining the PPO model...")
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
-        verbose=1,
+    ent_coef_arg = args.sac_ent_coef
+    if ent_coef_arg != "auto":
+        try:
+            ent_coef_arg = float(ent_coef_arg)
+        except ValueError:
+            print(f"Warning: Could not parse ent_coef '{ent_coef_arg}', defaulting to 'auto'")
+            ent_coef_arg = "auto"
+
+    print(f"[{p_id}] defining the sbx SAC model...")
+
+    # Using the hyperparameters from your reference script
+    model = SAC(
+        policy="MlpPolicy",
+        env=vec_env,
+
+        # --- Optimization ---
+        learning_rate=args.sac_learning_rate,
+        gamma=args.sac_gamma,
+        tau=args.sac_tau,
+        ent_coef=ent_coef_arg,
+
+        # --- Replay Buffer ---
+        buffer_size=args.sac_buffer_size,  # Large RAM usage warning applies here
+        batch_size=args.sac_batch_size,
+        learning_starts=args.sac_learning_starts,
+
+        # --- Training Frequency ---
+        train_freq=args.sac_train_freq,
+        gradient_steps=args.sac_gradient_steps,
+
+        # --- Exploration ---
+        use_sde=args.sac_use_sde,
+
+        # --- Logging ---
+        verbose=args.sac_verbose,
         tensorboard_log=LOG_DIR,
-        learning_rate=args.ppo_learning_rate,
-        n_steps=N_STEPS,
-        batch_size=args.ppo_batch_size,
-        n_epochs=args.ppo_n_epochs,
-        gamma=args.ppo_gamma,
-        gae_lambda=args.ppo_gae_lambda,
-        clip_range=args.ppo_clip_range,
-        ent_coef=args.ppo_ent_coef,
-        vf_coef=args.ppo_vf_coef,
-        max_grad_norm=args.ppo_max_grad_norm,
-        device='cpu'   # sb3 ppo made to train on cpu (actually faster)
+        device="auto"  # SBX (JAX) will try to use GPU
     )
+
     stats_callback = StatsCallback()
 
     print(f"[{p_id}] starting training for {TOTAL_TIMESTEPS} timesteps...")
@@ -88,26 +120,29 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     return stats
 
 
-def train_sb3_parallel_policies_PPO(reward_funcs, args, stat_frequency: int):
+def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int):
     """
-    Trains multiple PPO policies in parallel using multiprocessing.
+    Trains multiple SAC policies in parallel using multiprocessing.
     """
     num_workers = args.num_parallel_trains
 
-    # create a list of arguments for each train_ppo call
-    # each item is a tuple: (p_id, reward_func, args, stat_frequency)
+    # IMPORTANT: When running JAX (sbx) in multiprocessing on a single GPU,
+    # JAX will try to allocate ~80-90% of VRAM for the first process, causing OOM error for others.
+    # need to set the following environment variables before running this script (at top of script!):
+    # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+    # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{1/num_workers:.2f}"
+
     tasks = []
     for idx, reward_func in enumerate(reward_funcs):
         tasks.append((idx, reward_func, args, stat_frequency))
 
-    print(f"\n--- Training {len(reward_funcs)} Policies ({num_workers} in Parallel at a time) ---")
+    print(f"\n--- Training {len(reward_funcs)} Policies (SAC) ({num_workers} in Parallel at a time) ---")
 
-    # use 'spawn' start method for CUDA safety. This is crucial!
+    # 'spawn' is required for CUDA/JAX safety
     ctx = multiprocessing.get_context("spawn")
 
     with ctx.Pool(processes=num_workers) as pool:
-        # use starmap to pass the tuples of arguments to train_ppo
-        all_stats = pool.starmap(train_ppo, tasks)
+        all_stats = pool.starmap(train_sac, tasks)
 
     print(f"--- All {len(all_stats)} Parallel Training Jobs Complete ---")
     return all_stats

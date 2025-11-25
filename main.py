@@ -1,78 +1,13 @@
 from train.train_PPO_parallel import train_rllib_multi_policy
 import argparse
-from train.train_PPO_sb3 import train_sb3_parallel_policies
-from utils.utils import (ChatSession, parse_and_validate_code_blocks)
-from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, rew_reflection_1,
-                                                rew_reflection_2, walker_2d_v4_description,
-                                                reward_func_context, code_formatting_tip_bonus,
+from train.train_PPO_sb3 import train_sb3_parallel_policies_PPO
+from train.train_SAC_sbx import train_sbx_parallel_policies_SAC
+from utils.utils import (ChatSession, get_funcs, get_reflection)
+from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, reward_func_context,
                                                 init_user_prompt)
-from utils.prompts_and_env_code.environment_code import walker_2d_v4_code
-from utils.CustomRewardWrapper import RewardFunctionWrapper
+from utils.prompts_and_env_code.environment_code import (walker_2d_v5_code, walker_2d_v5_description,
+                                                         Humanoid_v5_code, Humanoid_v5_description)
 import ray
-
-
-def get_funcs(env_id, gpt, messages, num_funcs=16):
-    reward_funcs = []
-    while len(reward_funcs) < num_funcs:
-        reward_string = gpt.ask(messages=messages)
-        reward_str_list, full_str = parse_and_validate_code_blocks(env_id, reward_string)
-        if len(reward_str_list) > 1:
-            print("Multiple valid reward functions detected in single llm output..."
-                  " Will ignore this iteration...")
-        elif len(reward_str_list) == 1:
-            reward_funcs += [RewardFunctionWrapper(reward_str_list[0], full_str)]
-    return reward_funcs
-
-
-def get_reflection(training_results, messages, epoch_freq):
-    best_index = None
-    max_fitness = float("-inf")
-    for idx, result in enumerate(training_results):
-        curr_max_fitness = result["score"]["max"]
-        if curr_max_fitness > max_fitness:
-            max_fitness = curr_max_fitness
-            best_index = idx
-
-    assert best_index is not None  # not None
-    best_result = training_results[best_index]
-    separator = "\n"
-    key_val_format = "{k}: {v}, max: {max}, mean: {mean}, min: {min}"
-
-    reward_component_string = separator.join(key_val_format.format(k=k, v=str(dictionary["value_list"]),
-                                                                   max=dictionary["max"], mean=dictionary["mean"],
-                                                                   min=dictionary["min"])
-                                             for k, dictionary in best_result["reward_components"].items())
-
-    fitness_and_ep_lens_string = separator.join(
-        [key_val_format.format(k="fitness score", v=best_result["score"]["value_list"],
-                               max=best_result["score"]["max"],
-                               mean=best_result["score"]["mean"],
-                               min=best_result["score"]["min"]),
-         key_val_format.format(k="episode lengths",
-                               v=best_result["ep_lens"]["value_list"],
-                               max=best_result["ep_lens"]["max"],
-                               mean=best_result["ep_lens"]["mean"],
-                               min=best_result["ep_lens"]["min"])
-         ])
-
-    best_code_string = best_result["code"]
-
-    reflection_string = (rew_reflection_1.format(epoch_freq=epoch_freq) + "\n" + reward_component_string + "\n"
-                         + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
-                         code_formatting_tip_bonus)
-
-    print("\n\n" + best_code_string + "\n\n")
-    print("\n\n" + reflection_string + "\n\n")
-
-    if len(messages) == 2:
-        messages += [{"role": "assistant", "content": best_code_string}]
-        messages += [{"role": "user", "content": reflection_string}]
-    else:
-        assert len(messages) == 4
-        messages[-2] = {"role": "assistant", "content": best_code_string}
-        messages[-1] = {"role": "user", "content": reflection_string}
-
-    return messages
 
 
 def reward_evolution(alg_args):
@@ -87,10 +22,12 @@ def reward_evolution(alg_args):
     gpt = ChatSession(model=alg_args.gpt_model)
 
     sys_prompt = (init_sys_prompt + "\n" + reward_func_context + "\n" + code_formatting_tip)
-    #  + "\n" + code_formatting_tip_bonus
 
-    user_prompt = init_user_prompt.format(task_obs_code_string=walker_2d_v4_code,
-                                          task_description=walker_2d_v4_description)
+    env_code = walker_2d_v5_code if args.env_id == "Walker2d-v5" else Humanoid_v5_code
+    env_description = walker_2d_v5_description if args.env_id == "Walker2d-v5" else Humanoid_v5_description
+
+    user_prompt = init_user_prompt.format(task_obs_code_string=env_code,
+                                          task_description=env_description)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}]
 
     for iteration in range(alg_args.num_iterations):
@@ -101,9 +38,13 @@ def reward_evolution(alg_args):
         while True:
             try:
                 if alg_args.library == "stable_baselines_3":
-                    training_results = train_sb3_parallel_policies(reward_funcs=reward_funcs, args=alg_args,
-                                                                   stat_frequency=epoch_stat_freq)
-                else:
+                    if args.rl_algorithm == "PPO":
+                        training_results = train_sb3_parallel_policies_PPO(reward_funcs=reward_funcs, args=alg_args,
+                                                                           stat_frequency=epoch_stat_freq)
+                    else:  # using SAC
+                        training_results = train_sbx_parallel_policies_SAC(reward_funcs=reward_funcs, args=alg_args,
+                                                                           stat_frequency=epoch_stat_freq)
+                else:  # using rllib library (PPO)
                     training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
                                                                 env_id=alg_args.env_id, stat_frequency=300,
                                                                 max_iterations=3_000)
@@ -131,22 +72,28 @@ def main(alg_args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Evolve reward functions using PPO and GPT.")
+    parser = argparse.ArgumentParser(description="Evolve reward functions using PPO or SAC and GPT.")
 
+    parser.add_argument("--rl_algorithm", type=str, default="SAC", help="rl algorithm to use for training",
+                        choices=["PPO", "SAC"])
+
+    # only PPO works with RLLib to use SAC you must use sb3 (actually sbx to be precise)
     # --- Library ---
     parser.add_argument("--library", type=str, default="stable_baselines_3",
                         help="stable baselines 3 or ray.rllib", choices=["stable_baselines_3", "ray_rllib"])
 
     # Note: args below are only for sb3 implementation (aside from env_id)
     # sb3 delivers more stable performant learning vs rllib ppo implementation (rllib is faster per episode multipolicy)
+    # For Humanoid env SAC performs alot better
 
     # --- Evolution Loop Parameters ---
-    parser.add_argument("--env_id", type=str, default="Walker2d-v4", help="Gymnasium environment ID")
-    parser.add_argument("--num_iterations", type=int, default=5, help="Number of reward evolution iterations")
-    parser.add_argument("--gpt_model", type=str, default="gpt-5",
-                        choices=["gpt-4", "gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5"],
+    parser.add_argument("--env_id", type=str, default="Humanoid-v5", help="Gymnasium environment ID",
+                        choices=["Walker2d-v5", "Humanoid-v5"])
+    parser.add_argument("--num_iterations", type=int, default=3, help="Number of reward evolution iterations")
+    parser.add_argument("--gpt_model", type=str, default="gpt-5.1",
+                        choices=["gpt-4", "gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5", "gpt-5.1"],
                         help="GPT model name for ChatSession")
-    parser.add_argument("--num_funcs_per_iteration", type=int, default=4,
+    parser.add_argument("--num_funcs_per_iteration", type=int, default=2,
                         help="Number of reward functions to generate per iteration")
 
     # --- RL Training Parameters ---
@@ -176,6 +123,21 @@ if __name__ == '__main__':
     parser.add_argument("--ppo_verbose", type=float, default=1,
                         help="PPO verbosity level: 0 for no output, 1 for info messages "
                              "(such as device or wrappers used), 2 for debug messages")
+
+    # --- SAC Hyperparameters ---
+    parser.add_argument("--sac_learning_rate", type=float, default=3e-4, help="SAC learning rate")
+    parser.add_argument("--sac_buffer_size", type=int, default=300_000, help="SAC replay buffer size")  # 1_000_000
+    parser.add_argument("--sac_batch_size", type=int, default=256, help="SAC mini-batch size")
+    parser.add_argument("--sac_gamma", type=float, default=0.99, help="SAC discount factor")
+    parser.add_argument("--sac_tau", type=float, default=0.005, help="SAC soft update coefficient (polyak averaging)")
+    parser.add_argument("--sac_ent_coef", type=str, default="auto",
+                        help="SAC entropy coefficient (use 'auto' or a float string like '0.1')")
+    parser.add_argument("--sac_learning_starts", type=int, default=10_000, help="SAC steps before learning starts")
+    parser.add_argument("--sac_train_freq", type=int, default=1, help="SAC training frequency (in steps)")
+    parser.add_argument("--sac_gradient_steps", type=int, default=1, help="SAC gradient steps per training trigger")
+    parser.add_argument("--sac_use_sde", action="store_true", default=False,
+                        help="Enable State Dependent Exploration (SDE)")
+    parser.add_argument("--sac_verbose", type=int, default=1, help="SAC verbosity level")
 
     # --- Vectorized environment parameters ---
     parser.add_argument("--vec_env_norm_obs", type=bool, default=True, help="normalize observations in env")

@@ -1,0 +1,65 @@
+class Walker2dEnv(MujocoEnv, utils.EzPickle):
+    """Rest of the environment definition omitted."""
+
+    """
+    ## Action Space
+    ```{figure} action_space_figures/walker2d.png
+    :name: walker2d
+    ```
+
+    The action space is a `Box(-1, 1, (6,), float32)`. An action represents the torques applied at the hinge joints.
+
+    | Num | Action                                 | Control Min | Control Max | Name (in corresponding XML file) | Joint | Type (Unit)  |
+    |-----|----------------------------------------|-------------|-------------|----------------------------------|-------|--------------|
+    | 0   | Torque applied on the thigh rotor      | -1          | 1           | thigh_joint                      | hinge | torque (N m) |
+    | 1   | Torque applied on the leg rotor        | -1          | 1           | leg_joint                        | hinge | torque (N m) |
+    | 2   | Torque applied on the foot rotor       | -1          | 1           | foot_joint                       | hinge | torque (N m) |
+    | 3   | Torque applied on the left thigh rotor | -1          | 1           | thigh_left_joint                 | hinge | torque (N m) |
+    | 4   | Torque applied on the left leg rotor   | -1          | 1           | leg_left_joint                   | hinge | torque (N m) |
+    | 5   | Torque applied on the left foot rotor  | -1          | 1           | foot_left_joint                  | hinge | torque (N m) |
+
+
+    ## Observation Space
+    The observation space consists of the following parts (in order):
+
+    - *qpos (8 elements by default):* Position values of the robot's body parts.
+    - *qvel (9 elements):* The velocities of these individual body parts (their derivatives).
+
+    By default, the observation does not include the robot's x-coordinate (`rootx`).
+    This can be included by passing `exclude_current_positions_from_observation=False` during construction.
+    In this case, the observation space will be a `Box(-Inf, Inf, (18,), float64)`, where the first observation element is the x-coordinate of the robot.
+    Regardless of whether `exclude_current_positions_from_observation` is set to `True` or `False`, the x-coordinate are returned in `info` with the keys `"x_position"` and `"y_position"`, respectively.
+
+    By default, however, the observation space is a `Box(-Inf, Inf, (17,), float64)` where the elements are as follows:
+
+    | Num | Observation                                        | Min  | Max | Name (in corresponding XML file) | Joint | Type (Unit)              |
+    | --- | -------------------------------------------------- | ---- | --- | -------------------------------- | ----- | ------------------------ |
+    | 0   | z-coordinate of the torso (height of Walker2d)     | -Inf | Inf | rootz                            | slide | position (m)             |
+    | 1   | angle of the torso                                 | -Inf | Inf | rooty                            | hinge | angle (rad)              |
+    | 2   | angle of the thigh joint                           | -Inf | Inf | thigh_joint                      | hinge | angle (rad)              |
+    | 3   | angle of the leg joint                             | -Inf | Inf | leg_joint                        | hinge | angle (rad)              |
+    | 4   | angle of the foot joint                            | -Inf | Inf | foot_joint                       | hinge | angle (rad)              |
+    | 5   | angle of the left thigh joint                      | -Inf | Inf | thigh_left_joint                 | hinge | angle (rad)              |
+    | 6   | angle of the left leg joint                        | -Inf | Inf | leg_left_joint                   | hinge | angle (rad)              |
+    | 7   | angle of the left foot joint                       | -Inf | Inf | foot_left_joint                  | hinge | angle (rad)              |
+    | 8   | velocity of the x-coordinate of the torso          | -Inf | Inf | rootx                            | slide | velocity (m/s)           |
+    | 9   | velocity of the z-coordinate (height) of the torso | -Inf | Inf | rootz                            | slide | velocity (m/s)           |
+    | 10  | angular velocity of the angle of the torso         | -Inf | Inf | rooty                            | hinge | angular velocity (rad/s) |
+    | 11  | angular velocity of the thigh hinge                | -Inf | Inf | thigh_joint                      | hinge | angular velocity (rad/s) |
+    | 12  | angular velocity of the leg hinge                  | -Inf | Inf | leg_joint                        | hinge | angular velocity (rad/s) |
+    | 13  | angular velocity of the foot hinge                 | -Inf | Inf | foot_joint                       | hinge | angular velocity (rad/s) |
+    | 14  | angular velocity of the thigh hinge                | -Inf | Inf | thigh_left_joint                 | hinge | angular velocity (rad/s) |
+    | 15  | angular velocity of the leg hinge                  | -Inf | Inf | leg_left_joint                   | hinge | angular velocity (rad/s) |
+    | 16  | angular velocity of the foot hinge                 | -Inf | Inf | foot_left_joint                  | hinge | angular velocity (rad/s) |
+    | excluded | x-coordinate of the torso                     | -Inf | Inf | rootx                            | slide | position (m)             |
+    """
+
+    def _get_obs(self):
+    position = self.data.qpos.flatten()
+    velocity = np.clip(self.data.qvel.flatten(), -10, 10)
+
+    if self._exclude_current_positions_from_observation:
+        position = position[1:]
+
+    observation = np.concatenate((position, velocity)).ravel()
+    return observation
