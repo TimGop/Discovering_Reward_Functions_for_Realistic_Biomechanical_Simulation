@@ -105,9 +105,9 @@ if __name__ == '__main__':
                         help="Number of steps per environment per PPO update (rollout buffer size)")
 
     # --- Logging ---
-    parser.add_argument("--log_dir", type=str, default="../../logs",
+    parser.add_argument("--log_dir", type=str, default="logs",
                         help="Directory for Stable Baselines3 logs (Tensorboard)")
-    parser.add_argument("--model_dir", type=str, default="../../models",
+    parser.add_argument("--model_dir", type=str, default="models",
                         help="Directory to save trained models and VecNormalize stats")
 
     # --- PPO Hyperparameters ---
