@@ -233,8 +233,8 @@ def load_string_from_file(filepath):
         return None
 
 
-def create_custom_reward_env(p_id, reward_func, ENV_ID):
-    base_env = gym.make(ENV_ID)
+def create_custom_reward_env(p_id, reward_func, ENV_ID, render_mode=None):
+    base_env = gym.make(ENV_ID, render_mode=render_mode)
     env = CustomRewardWrapper(base_env, reward_func, p_id)
     env = FlattenStatsWrapper(env)
     env = RecordEpisodeStatistics(env)

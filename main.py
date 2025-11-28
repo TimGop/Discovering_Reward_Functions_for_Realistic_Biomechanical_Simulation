@@ -40,14 +40,16 @@ def reward_evolution(alg_args):
                 if alg_args.library == "stable_baselines_3":
                     if args.rl_algorithm == "PPO":
                         training_results = train_sb3_parallel_policies_PPO(reward_funcs=reward_funcs, args=alg_args,
-                                                                           stat_frequency=epoch_stat_freq)
+                                                                           stat_frequency=epoch_stat_freq,
+                                                                           eureka_it=iteration)
                     else:  # using SAC
                         training_results = train_sbx_parallel_policies_SAC(reward_funcs=reward_funcs, args=alg_args,
-                                                                           stat_frequency=epoch_stat_freq)
+                                                                           stat_frequency=epoch_stat_freq,
+                                                                           eureka_it=iteration)
                 else:  # using rllib library (PPO)
                     training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
                                                                 env_id=alg_args.env_id, stat_frequency=300,
-                                                                max_iterations=3_000)
+                                                                max_iterations=3_000, eureka_it=iteration)
                 break
             except Exception as e:
                 print(f"Training failed with exception: {e}")
@@ -77,7 +79,8 @@ if __name__ == '__main__':
     parser.add_argument("--rl_algorithm", type=str, default="SAC", help="rl algorithm to use for training",
                         choices=["PPO", "SAC"])
 
-    # only PPO works with RLLib to use SAC you must use sb3 (actually sbx to be precise)
+    # only PPO works with RLLib and sb3 to use SAC you must use sb3 (actually sbx to be precise)
+    # Note: video reward reflection variant only implemented for sb3 PPO and SAC
     # --- Library ---
     parser.add_argument("--library", type=str, default="stable_baselines_3",
                         help="stable baselines 3 or ray.rllib", choices=["stable_baselines_3", "ray_rllib"])

@@ -1,15 +1,31 @@
 import multiprocessing
+import platform
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecNormalize
 import os
 import time
 import functools
-from utils.Callbacks.Callbacks_sb3 import StatsCallback
+from utils.Callbacks.Callbacks_sb3 import AutoRecordStatsCallback
 from utils.utils import create_custom_reward_env, process_callback_stats
+# for recording
+system_os = platform.system()  # Returns 'Windows', 'Linux', or 'Darwin' (Mac)
 
+if system_os == "Windows":
+    # Windows: Do nothing.
+    # MuJoCo will default to "glfw" (which creates a hidden window for recording).
+    print("Detected Windows: Using default MuJoCo backend (GLFW).")
 
-def train_ppo(p_id, reward_func, args, stat_frequency: int):
+elif system_os == "Linux":
+    # Linux: Check if we are headless (no monitor attached)
+    # The 'DISPLAY' environment variable is usually missing on headless servers.
+    if "DISPLAY" not in os.environ:
+        print("Detected Headless Linux: Force-enabling EGL backend.")
+        os.environ["MUJOCO_GL"] = "egl"
+    else:
+        print("Detected Linux with Display: Using default backend.")
+
+def train_ppo(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
     ENV_ID = args.env_id
     N_ENVS = args.n_envs
     N_STEPS = args.n_steps
@@ -51,7 +67,17 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
         max_grad_norm=args.ppo_max_grad_norm,
         device='cpu'   # sb3 ppo made to train on cpu (actually faster)
     )
-    stats_callback = StatsCallback()
+
+    def eval_env_creator():
+        # create gym env with rgb for recording videos
+        func = functools.partial(create_custom_reward_env, p_id, reward_func, ENV_ID, "rgb_array")
+        venv = make_vec_env(func, n_envs=1, seed=args.vec_env_seed)
+        venv = VecNormalize(venv, norm_obs=args.vec_env_norm_obs, norm_reward=False,
+                            clip_obs=args.vec_env_clip_obs, training=False)
+        return venv
+
+    stats_callback = AutoRecordStatsCallback(env_creator=eval_env_creator,
+                                             video_folder=f"videos/PPO_eureka_{eureka_it}_policy_{p_id}")
 
     print(f"[{p_id}] starting training for {TOTAL_TIMESTEPS} timesteps...")
     model.learn(
@@ -88,7 +114,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int):
     return stats
 
 
-def train_sb3_parallel_policies_PPO(reward_funcs, args, stat_frequency: int):
+def train_sb3_parallel_policies_PPO(reward_funcs, args, stat_frequency: int, eureka_it: int):
     """
     Trains multiple PPO policies in parallel using multiprocessing.
     """
@@ -98,7 +124,7 @@ def train_sb3_parallel_policies_PPO(reward_funcs, args, stat_frequency: int):
     # each item is a tuple: (p_id, reward_func, args, stat_frequency)
     tasks = []
     for idx, reward_func in enumerate(reward_funcs):
-        tasks.append((idx, reward_func, args, stat_frequency))
+        tasks.append((idx, reward_func, args, stat_frequency, eureka_it))
 
     print(f"\n--- Training {len(reward_funcs)} Policies ({num_workers} in Parallel at a time) ---")
 

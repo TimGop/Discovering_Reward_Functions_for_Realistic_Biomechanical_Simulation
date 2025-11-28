@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import platform
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
@@ -13,11 +14,29 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import VecNormalize
 
 # custom Utils
-from utils.Callbacks.Callbacks_sb3 import StatsCallback
+from utils.Callbacks.Callbacks_sb3 import AutoRecordStatsCallback
 from utils.utils import create_custom_reward_env, process_callback_stats
 
+# for recording
+system_os = platform.system()  # Returns 'Windows', 'Linux', or 'Darwin' (Mac)
 
-def train_sac(p_id, reward_func, args, stat_frequency: int):
+if system_os == "Windows":
+    # Windows: Do nothing.
+    # MuJoCo will default to "glfw" (which creates a hidden window for recording).
+    print("Detected Windows: Using default MuJoCo backend (GLFW).")
+
+elif system_os == "Linux":
+    # Linux: Check if we are headless (no monitor attached)
+    # The 'DISPLAY' environment variable is usually missing on headless servers.
+    if "DISPLAY" not in os.environ:
+        print("Detected Headless Linux: Force-enabling EGL backend.")
+        os.environ["MUJOCO_GL"] = "egl"
+    else:
+        print("Detected Linux with Display: Using default backend.")
+
+
+def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
+
     ENV_ID = args.env_id
     N_ENVS = args.n_envs
     # SAC is off-policy and doesn't strictly use n_steps for updates,
@@ -83,7 +102,16 @@ def train_sac(p_id, reward_func, args, stat_frequency: int):
         device="auto"  # SBX (JAX) will try to use GPU
     )
 
-    stats_callback = StatsCallback()
+    def eval_env_creator():
+        # create gym env with rgb for recording videos
+        func = functools.partial(create_custom_reward_env, p_id, reward_func, ENV_ID, "rgb_array")
+        venv = make_vec_env(func, n_envs=1, seed=args.vec_env_seed)
+        venv = VecNormalize(venv, norm_obs=args.vec_env_norm_obs, norm_reward=False,
+                            clip_obs=args.vec_env_clip_obs, training=False)
+        return venv
+
+    stats_callback = AutoRecordStatsCallback(env_creator=eval_env_creator,
+                                             video_folder=f"videos/SAC_eureka_{eureka_it}_policy_{p_id}")
 
     print(f"[{p_id}] starting training for {TOTAL_TIMESTEPS} timesteps...")
     model.learn(
@@ -120,7 +148,7 @@ def train_sac(p_id, reward_func, args, stat_frequency: int):
     return stats
 
 
-def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int):
+def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int, eureka_it: int):
     """
     Trains multiple SAC policies in parallel using multiprocessing.
     """
@@ -134,7 +162,7 @@ def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int):
 
     tasks = []
     for idx, reward_func in enumerate(reward_funcs):
-        tasks.append((idx, reward_func, args, stat_frequency))
+        tasks.append((idx, reward_func, args, stat_frequency, eureka_it))
 
     print(f"\n--- Training {len(reward_funcs)} Policies (SAC) ({num_workers} in Parallel at a time) ---")
 
