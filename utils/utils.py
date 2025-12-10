@@ -1,5 +1,9 @@
 import openai
 import os
+
+from google import genai
+
+from .prompts_and_env_code.prompts import vid_comp_prompt
 from openai import OpenAI
 import gymnasium as gym
 from gymnasium.wrappers import RecordEpisodeStatistics
@@ -11,6 +15,7 @@ import torch
 import inspect
 import numpy as np
 import pandas as pd
+import time
 
 from .prompts_and_env_code.prompts import rew_reflection_1, rew_reflection_2, code_formatting_tip_bonus, \
     code_formatting_tip
@@ -20,6 +25,7 @@ EXPECTED_PARAMS = ["observation", "action", "next_observation", "terminated", "t
 EXPECTED_RETURN_TYPE = Tuple[torch.Tensor, Dict[str, torch.Tensor]]
 
 
+# GPT for obtaining reward functions in Eureka loop
 class ChatSession:
     def __init__(self, model="gpt-5-nano-2025-08-07"):
         if not os.getenv("OPENAI_API_KEY"):
@@ -154,7 +160,7 @@ def parse_and_validate_code_blocks(env_id, text_blob: str, required_imports=None
     return valid_code_strings, text_blob
 
 
-def get_reflection(training_results, messages, epoch_freq):
+def get_reflection(training_results, messages, epoch_freq, args, eureka_iteration, video_llm, previous_best_fitness):
     best_index = None
     max_fitness = float("-inf")
     for idx, result in enumerate(training_results):
@@ -164,6 +170,19 @@ def get_reflection(training_results, messages, epoch_freq):
             best_index = idx
 
     assert best_index is not None  # not None
+
+    if args.library == "ray_rllib" or args.video_feedback is False:
+        policy_video_path = None
+        target_video_path = None
+    else:
+        target_video_path = "videos/target_run.mp4"
+        if args.rl_algorithm == "PPO":
+            policy_video_path = (f"videos/PPO_eureka_{eureka_iteration}_policy_{best_index}/"
+                                 f"best_fitness-step-0-to-step-1000.mp4")
+        else:  # SAC
+            policy_video_path = (f"videos/SAC_eureka_{eureka_iteration}_policy_{best_index}/"
+                                 f"best_fitness-step-0-to-step-1000.mp4")
+
     best_result = training_results[best_index]
     separator = "\n"
     key_val_format = "{k}: {v}, max: {max}, mean: {mean}, min: {min}"
@@ -191,18 +210,97 @@ def get_reflection(training_results, messages, epoch_freq):
                          + fitness_and_ep_lens_string + "\n\n" + rew_reflection_2 + " " + code_formatting_tip + "\n" +
                          code_formatting_tip_bonus)
 
-    print("\n\n" + best_code_string + "\n\n")
-    print("\n\n" + reflection_string + "\n\n")
+    if args.library != "ray_rllib" and args.video_feedback is True:
+        vid_reflection = compare_videos([policy_video_path, target_video_path], video_llm, best_code_string)
+        reflection_string += f"\n\n{vid_reflection}"
 
-    if len(messages) == 2:
+    length = len(messages)
+    if length == 2:
         messages += [{"role": "assistant", "content": best_code_string}]
         messages += [{"role": "user", "content": reflection_string}]
+        print("\n\n" + best_code_string + "\n\n")
+        print("\n\n" + reflection_string + "\n\n")
     else:
-        assert len(messages) == 4
-        messages[-2] = {"role": "assistant", "content": best_code_string}
-        messages[-1] = {"role": "user", "content": reflection_string}
+        messages_suffix = [{"role": "assistant", "content": best_code_string},
+                           {"role": "user", "content": reflection_string}]
+        assert (length == 4 or length == 6)
 
-    return messages
+        if previous_best_fitness <= max_fitness:
+            messages = messages[:2] + messages_suffix
+            print("\n\n" + best_code_string + "\n\n")
+            print("\n\n" + reflection_string + "\n\n")
+        else:
+            messages = messages[:4] + messages_suffix
+            print("\n\n" + str(messages[2]) + "\n\n" + str(messages[3]) + "\n\n")
+            print("\n\n" + best_code_string + "\n\n")
+            print("\n\n" + reflection_string + "\n\n")
+
+    return messages, max_fitness
+
+
+def wait_for_files_active(file_names, client):
+    """Waits for uploaded files to transition to the ACTIVE state."""
+    print("Waiting for file processing...", end="")
+
+    for name in file_names:
+        while True:
+            # Check file status
+            file_obj = client.files.get(name=name)
+
+            if file_obj.state == "ACTIVE":
+                # File is ready
+                break
+            elif file_obj.state == "FAILED":
+                raise Exception(f"File {name} failed to process.")
+
+            # If still PROCESSING, wait and check again
+            print(".", end="", flush=True)
+            time.sleep(2)
+
+    print("\nAll files ready.")
+
+
+def compare_videos(video_paths, client, reward_code=None):
+    uploaded_files = []
+
+    # 1. Upload
+    for path in video_paths:
+        print(f"Uploading: {path}...")
+        file_ref = client.files.upload(file=path)
+        uploaded_files.append(file_ref)
+
+    # 2. CRITICAL STEP: WAIT FOR PROCESSING
+    # We extract the names from the file objects to pass to our wait function
+    file_names = [f.name for f in uploaded_files]
+    wait_for_files_active(file_names, client)
+
+    # 3. Request
+    request_content = []
+
+    # Add the actual file objects to the request
+    for f in uploaded_files:
+        request_content.append(f)
+
+    # Add prompt
+    prompt_text = vid_comp_prompt
+    if reward_code:
+        prompt_text += reward_code
+    request_content.append(prompt_text)
+
+    print("Generating comparison...")
+
+    # Use the correct model
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=request_content
+    )
+
+    # 4. Cleanup
+    print("Cleaning up files...")
+    for name in file_names:
+        client.files.delete(name=name)
+
+    return response.text
 
 
 def save_string_to_file(filepath, content):
@@ -316,3 +414,46 @@ def process_callback_stats(episode_stats, n_steps, n_envs, reward_func_code, sta
                 component_dict.setdefault("max", []).append(batch_df[col_name].max())
 
     return finalize_single_stat(stats)
+
+
+def list_available_models():
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("Error: GEMINI_API_KEY not found in environment variables.")
+        return
+
+    client = genai.Client(api_key=api_key)
+
+    print(f"{'Model Name':<30} | {'Display Name':<30}")
+    print("-" * 65)
+
+    try:
+        # Paginator for listing models
+        for model in client.models.list():
+            print(model)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+"""if __name__ == "__main__":
+    # Run `set GEMINI_API_KEY=your_key` in terminal before running script
+    API_KEY = os.environ.get("GEMINI_API_KEY")
+
+    if not API_KEY:
+        print("Please set the GEMINI_API_KEY environment variable.")
+    else:
+        client = genai.Client(api_key=API_KEY)
+
+        video_locations = [
+            "../videos/eureka_0_policy_0/best_fitness-step-0-to-step-1000.mp4",
+            "../videos/eureka_0_policy_1/best_fitness-step-0-to-step-1000.mp4"
+        ]
+
+        # Ensure files actually exist before running to avoid other errors
+        if all(os.path.exists(p) for p in video_locations):
+            print(compare_videos(video_locations, client))
+        else:
+            print("Video files not found. Check paths.")
+
+    # list_available_models()"""

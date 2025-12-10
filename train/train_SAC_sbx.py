@@ -2,8 +2,10 @@ import multiprocessing
 import os
 import platform
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.1"
 
 import time
 import functools
@@ -20,6 +22,7 @@ from utils.utils import create_custom_reward_env, process_callback_stats
 # for recording
 system_os = platform.system()  # Returns 'Windows', 'Linux', or 'Darwin' (Mac)
 
+# For main process
 if system_os == "Windows":
     # Windows: Do nothing.
     # MuJoCo will default to "glfw" (which creates a hidden window for recording).
@@ -37,6 +40,21 @@ elif system_os == "Linux":
 
 def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
 
+    # For every subprocess as well!
+    if system_os == "Windows":
+        # Windows: Do nothing.
+        # MuJoCo will default to "glfw" (which creates a hidden window for recording).
+        print("Detected Windows(subprocess): Using default MuJoCo backend (GLFW).")
+
+    elif system_os == "Linux":
+        # Linux: Check if we are headless (no monitor attached)
+        # The 'DISPLAY' environment variable is usually missing on headless servers.
+        if "DISPLAY" not in os.environ:
+            print("Detected Headless Linux(subprocess): Force-enabling EGL backend.")
+            os.environ["MUJOCO_GL"] = "egl"
+        else:
+            print("Detected Linux with Display(subprocess): Using default backend.")
+
     ENV_ID = args.env_id
     N_ENVS = args.n_envs
     # SAC is off-policy and doesn't strictly use n_steps for updates,
@@ -50,7 +68,7 @@ def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     timestamp = int(time.time())
-    model_name = f"sac_{ENV_ID}_{p_id}_{TOTAL_TIMESTEPS}_{timestamp}"
+    model_name = f"sac_{ENV_ID}_{eureka_it}_{p_id}_{TOTAL_TIMESTEPS}_{timestamp}"
     MODEL_PATH = os.path.join(MODEL_DIR, model_name)
     STATS_PATH = os.path.join(MODEL_DIR, f"{model_name}_vecnormalize.pkl")
 

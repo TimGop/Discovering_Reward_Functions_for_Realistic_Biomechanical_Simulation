@@ -1,27 +1,33 @@
+import os
+
 from train.train_PPO_parallel import train_rllib_multi_policy
 import argparse
 from train.train_PPO_sb3 import train_sb3_parallel_policies_PPO
 from train.train_SAC_sbx import train_sbx_parallel_policies_SAC
 from utils.utils import (ChatSession, get_funcs, get_reflection)
-from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip, reward_func_context,
+from utils.prompts_and_env_code.prompts import (init_sys_prompt, code_formatting_tip,
                                                 init_user_prompt)
 from utils.prompts_and_env_code.environment_code import (walker_2d_v5_code, walker_2d_v5_description,
                                                          Humanoid_v5_code, Humanoid_v5_description)
 import ray
+from google import genai
+API_KEY = os.environ.get("GEMINI_API_KEY")
 
 
 def reward_evolution(alg_args):
     """
     main eureka reward evolution loop
     """
+    best_fitness = float("-inf")  # across all eureka iterations
     if alg_args.num_iterations < 1:
         alg_args.num_iterations = 1
 
     epoch_stat_freq = max(int(alg_args.n_rollouts // 10), 1)  # stat frequency, e.g., 10% of total batches
 
     gpt = ChatSession(model=alg_args.gpt_model)
+    gemini = genai.Client(api_key=API_KEY)
 
-    sys_prompt = (init_sys_prompt + "\n" + reward_func_context + "\n" + code_formatting_tip)
+    sys_prompt = (init_sys_prompt + "\n" + code_formatting_tip)  # "\n" + reward_func_context
 
     env_code = walker_2d_v5_code if args.env_id == "Walker2d-v5" else Humanoid_v5_code
     env_description = walker_2d_v5_description if args.env_id == "Walker2d-v5" else Humanoid_v5_description
@@ -46,17 +52,20 @@ def reward_evolution(alg_args):
                         training_results = train_sbx_parallel_policies_SAC(reward_funcs=reward_funcs, args=alg_args,
                                                                            stat_frequency=epoch_stat_freq,
                                                                            eureka_it=iteration)
-                else:  # using rllib library (PPO)
+                else:  # using rllib library (PPO) --> Note: no video reward reflection
                     training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
                                                                 env_id=alg_args.env_id, stat_frequency=300,
-                                                                max_iterations=3_000, eureka_it=iteration)
+                                                                max_iterations=3_000)
                 break
             except Exception as e:
                 print(f"Training failed with exception: {e}")
-                # sometimes when using ray workers fail and retrying the training loop "magically fixes the problem
+                # sometimes when using ray, workers fail and retrying the training loop "magically" fixes the problem
                 print("Retrying training loop...")
 
-        messages = get_reflection(training_results, messages, epoch_stat_freq)
+        messages, max_fitness = get_reflection(training_results, messages, epoch_stat_freq, args, iteration,
+                                               video_llm=gemini, previous_best_fitness=best_fitness)
+        if best_fitness < max_fitness:
+            best_fitness = max_fitness
 
 
 def main(alg_args):
@@ -92,12 +101,14 @@ if __name__ == '__main__':
     # --- Evolution Loop Parameters ---
     parser.add_argument("--env_id", type=str, default="Humanoid-v5", help="Gymnasium environment ID",
                         choices=["Walker2d-v5", "Humanoid-v5"])
-    parser.add_argument("--num_iterations", type=int, default=3, help="Number of reward evolution iterations")
+    parser.add_argument("--num_iterations", type=int, default=5, help="Number of reward evolution iterations")
     parser.add_argument("--gpt_model", type=str, default="gpt-5.1",
                         choices=["gpt-4", "gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5", "gpt-5.1"],
                         help="GPT model name for ChatSession")
-    parser.add_argument("--num_funcs_per_iteration", type=int, default=2,
+    parser.add_argument("--num_funcs_per_iteration", type=int, default=16,
                         help="Number of reward functions to generate per iteration")
+    parser.add_argument("--video_feedback", type=bool, default=False,
+                        help="have video feedback to incentivize human-like movement")
 
     # --- RL Training Parameters ---
     # steps per rl agent rollout is n_envs * n_steps and therefore total steps is n_rollouts * n_envs * n_steps
@@ -129,7 +140,7 @@ if __name__ == '__main__':
 
     # --- SAC Hyperparameters ---
     parser.add_argument("--sac_learning_rate", type=float, default=3e-4, help="SAC learning rate")
-    parser.add_argument("--sac_buffer_size", type=int, default=300_000, help="SAC replay buffer size")  # 1_000_000
+    parser.add_argument("--sac_buffer_size", type=int, default=1_000_000, help="SAC replay buffer size")  # 1_000_000
     parser.add_argument("--sac_batch_size", type=int, default=256, help="SAC mini-batch size")
     parser.add_argument("--sac_gamma", type=float, default=0.99, help="SAC discount factor")
     parser.add_argument("--sac_tau", type=float, default=0.005, help="SAC soft update coefficient (polyak averaging)")
@@ -144,7 +155,7 @@ if __name__ == '__main__':
 
     # --- Vectorized environment parameters ---
     parser.add_argument("--vec_env_norm_obs", type=bool, default=True, help="normalize observations in env")
-    parser.add_argument("--vec_env_norm_reward", type=bool, default=True, help="normalize rewards in env")
+    parser.add_argument("--vec_env_norm_reward", type=bool, default=False, help="normalize rewards in env")
     parser.add_argument("--vec_env_clip_obs", type=float, default=10.0, help="observation clipping param")
     parser.add_argument("--vec_env_seed", type=int, default=0, help="initial random seed for env")
 

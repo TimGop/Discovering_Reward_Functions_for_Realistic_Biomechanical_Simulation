@@ -66,7 +66,7 @@ fitness scores and episode lengths after every {epoch_freq} epochs and the maxim
 minimum values encountered:"""
 rew_reflection_2 = """Please carefully analyze the policy feedback and provide a new, improved reward function that
 can better solve the task. Some helpful tips for analyzing the policy feedback:
-(1) If the success rates are always near zero, then you must rewrite the entire reward
+(1) If the fitness scores are always near zero, then you must rewrite the entire reward
 function
 (2) If the values for a certain reward component are near identical throughout, then this
 means RL is not able to optimize this component as it is written. You may consider
@@ -78,3 +78,7 @@ its value to a proper range
 Please analyze each existing reward component in the suggested manner above first, and then
 write the reward function code.
 """
+vid_comp_prompt = ("The first video is of an RL agent on the mujoco humanoid environment."
+                   " The second video is of a person running."
+                   " What tips do you have to make the reward function below for the RL agent"
+                   " produce more realistic movements?\n\n")
