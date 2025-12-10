@@ -161,31 +161,3 @@ def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
 
     print(f"--- [{p_id}] training Complete ---")
     return stats
-
-
-def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int, eureka_it: int):
-    """
-    Trains multiple SAC policies in parallel using multiprocessing.
-    """
-    num_workers = args.num_parallel_trains
-
-    # IMPORTANT: When running JAX (sbx) in multiprocessing on a single GPU,
-    # JAX will try to allocate ~80-90% of VRAM for the first process, causing OOM error for others.
-    # need to set the following environment variables before running this script (at top of script!):
-    # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-    # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{1/num_workers:.2f}"
-
-    tasks = []
-    for idx, reward_func in enumerate(reward_funcs):
-        tasks.append((idx, reward_func, args, stat_frequency, eureka_it))
-
-    print(f"\n--- Training {len(reward_funcs)} Policies (SAC) ({num_workers} in Parallel at a time) ---")
-
-    # 'spawn' is required for CUDA/JAX safety
-    ctx = multiprocessing.get_context("spawn")
-
-    with ctx.Pool(processes=num_workers) as pool:
-        all_stats = pool.starmap(train_sac, tasks)
-
-    print(f"--- All {len(all_stats)} Parallel Training Jobs Complete ---")
-    return all_stats
