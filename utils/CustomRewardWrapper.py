@@ -12,6 +12,34 @@ from pathlib import Path
 EXPECTED_NAME = "custom_reward_fn"
 
 
+class JustFitnessWrapper(gym.Wrapper):
+    def __init__(self, env: gym.Env):
+        super().__init__(env)
+        self.x_velocities = []
+
+    def reset(self, *, seed=None, options=None):
+        observation_np, info = super().reset(seed=seed, options=options)
+        self.x_velocities = []
+        return observation_np, info
+
+    def step(self, action):
+        observation_np, reward_np, terminated_np, truncated_np, info = self.env.step(action)
+        self.x_velocities.append(info.get('x_velocity', 0.0))  # x_vel for fitness
+        is_done = terminated_np or truncated_np
+        if is_done:
+            episode_duration = len(self.x_velocities)
+            if episode_duration > 0:
+                velocity_sum = sum(self.x_velocities)
+                fitness_score = np.float64(velocity_sum / 1000)  # full episode would have length 1000
+            else:
+                fitness_score = np.float64(-1.0)
+
+            info["fitness_score"] = fitness_score
+            info["episode_length"] = np.float64(episode_duration)
+
+        return observation_np, reward_np, terminated_np, truncated_np, info
+
+
 # creates a version of a given gym environment where we can add a custom reward function
 class CustomRewardWrapper(gym.Wrapper):
     def __init__(self, env: gym.Env, reward_fn: Callable, policy_id: str):

@@ -8,7 +8,7 @@ from openai import OpenAI
 import gymnasium as gym
 from gymnasium.wrappers import RecordEpisodeStatistics
 from .CustomRewardWrapper import compile_func_from_string, CustomRewardWrapper, FlattenStatsWrapper, \
-    RewardFunctionWrapper
+    RewardFunctionWrapper, JustFitnessWrapper
 import re
 from typing import List, Tuple, Dict
 import torch
@@ -332,10 +332,14 @@ def load_string_from_file(filepath):
 
 
 def create_custom_reward_env(p_id, reward_func, ENV_ID, render_mode=None):
-    base_env = gym.make(ENV_ID, render_mode=render_mode)
-    env = CustomRewardWrapper(base_env, reward_func, p_id)
-    env = FlattenStatsWrapper(env)
-    env = RecordEpisodeStatistics(env)
+    if reward_func is None:
+        base_env = gym.make(ENV_ID, render_mode=render_mode)
+        env = RecordEpisodeStatistics(FlattenStatsWrapper(JustFitnessWrapper(base_env)))
+    else:
+        base_env = gym.make(ENV_ID, render_mode=render_mode)
+        env = CustomRewardWrapper(base_env, reward_func, p_id)
+        env = FlattenStatsWrapper(env)
+        env = RecordEpisodeStatistics(env)
     return env
 
 
