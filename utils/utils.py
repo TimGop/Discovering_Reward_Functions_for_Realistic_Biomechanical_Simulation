@@ -170,6 +170,7 @@ def get_reflection(training_results, messages, epoch_freq, args, eureka_iteratio
             best_index = idx
 
     assert best_index is not None  # not None
+    print("highest max fitness for policy"+str(best_index))
 
     if args.library == "ray_rllib" or args.video_feedback is False:
         policy_video_path = None
