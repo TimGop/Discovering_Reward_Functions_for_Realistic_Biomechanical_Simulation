@@ -167,7 +167,6 @@ def train_sac(args, name,  run_no: int, reward_func=None):
 
 
 def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
-    # 1. Validation and DataFrame Creation
     dfs = []
     if not episode_stats_list:
         print("No episode stats list to plot.")
@@ -193,21 +192,18 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
         print("No valid DataFrames created.")
         return
 
-    # 2. Logic to Align Data (Interpolation)
-    # We need a common X-axis to calculate Mean/SD across different runs
+    # align Data (Interpolation)
 
     # Find the range of steps across all runs
     max_steps = max(df['total_steps'].iloc[-1] for df in dfs)
     min_steps = min(df['total_steps'].iloc[0] for df in dfs)
 
     # Create a common grid of steps (e.g., 1000 points across the whole training duration)
-    common_x = np.linspace(min_steps, max_steps, num=10_000)
+    common_x = np.linspace(min_steps, max_steps, num=100)
 
     interpolated_y_values = []
 
     for df in dfs:
-        # Interpolate this specific run's scores onto the common_x grid
-        # np.interp(target_x, source_x, source_y)
         y_interp = np.interp(common_x, df['total_steps'], df['fitness_score'])
         interpolated_y_values.append(y_interp)
 
@@ -218,15 +214,12 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
     y_mean = np.mean(y_matrix, axis=0)
     y_std = np.std(y_matrix, axis=0)
 
-    # 3. Plotting
     plt.figure(figsize=(12, 6))
     plt.style.use('ggplot')  # Optional: Makes it look nicer
 
-    # Plot the Standard Deviation (Shadow)
     plt.fill_between(common_x, y_mean - y_std, y_mean + y_std,
                      color='#1f77b4', alpha=0.2, label='Standard Deviation')
 
-    # Plot the Mean Line
     plt.plot(common_x, y_mean, color='#1f77b4', linewidth=2, label='Mean Fitness')
 
     # (Optional) Plot faint lines for individual runs to show raw noise
@@ -240,10 +233,11 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
     plt.legend(loc='upper left')
     plt.grid(True, which='both', linestyle='--', linewidth=0.5)
 
-    # Save to file
+    os.makedirs(save_dir, exist_ok=True)
+
     save_path = os.path.join(save_dir, f"{model_name}_raw_fitness.png")
     plt.savefig(save_path)
-    plt.close()  # Close to prevent memory leaks
+    plt.close()
 
     print(f"Raw fitness plot saved to: {save_path}")
 
@@ -258,7 +252,7 @@ def main(args):
     # eureka with video feedback reward function
     stats = []
     for i in range(5):
-        stats.append(train_sac(args, name="eureka_wo_vid", run_no=i, reward_func=custom_reward_fn))
+        stats.append(train_sac(args, name="eureka_with_vid", run_no=i, reward_func=custom_reward_fn))
     plot_raw_fitness_curve(stats, "plots", "eureka_with_video_reward")
 
 
@@ -287,7 +281,7 @@ if __name__ == "__main__":
 
     # --- RL Training Parameters ---
     # steps per rl agent rollout is n_envs * n_steps and therefore total steps is n_rollouts * n_envs * n_steps
-    parser.add_argument("--n_rollouts", type=int, default=250,
+    parser.add_argument("--n_rollouts", type=int, default=25,
                         help="Total rollouts for *each* PPO policy training")
     parser.add_argument("--n_envs", type=int, default=4, help="Number of parallel environments for PPO")
     parser.add_argument("--n_steps", type=int, default=2048,
