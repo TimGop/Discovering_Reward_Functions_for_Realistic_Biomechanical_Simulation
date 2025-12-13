@@ -4,7 +4,7 @@ import platform
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from reward_functions.eureka_reward_funcs import custom_reward_fn_with_video as custom_reward_fn
+from reward_functions.eureka_reward_funcs import custom_reward_fn_with_video, custom_reward_fn_without_video
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
@@ -250,10 +250,18 @@ def main(args):
     plot_raw_fitness_curve(stats, "plots", "base_reward")
 
     # eureka with video feedback reward function
+    custom_reward_fn = custom_reward_fn_with_video
     stats = []
     for i in range(5):
         stats.append(train_sac(args, name="eureka_with_vid", run_no=i, reward_func=custom_reward_fn))
     plot_raw_fitness_curve(stats, "plots", "eureka_with_video_reward")
+
+    # eureka without video feedback reward function
+    custom_reward_fn = custom_reward_fn_without_video
+    stats = []
+    for i in range(5):
+        stats.append(train_sac(args, name="eureka_without_vid", run_no=i, reward_func=custom_reward_fn))
+    plot_raw_fitness_curve(stats, "plots", "eureka_without_video_reward")
 
 
 if __name__ == "__main__":
@@ -281,7 +289,7 @@ if __name__ == "__main__":
 
     # --- RL Training Parameters ---
     # steps per rl agent rollout is n_envs * n_steps and therefore total steps is n_rollouts * n_envs * n_steps
-    parser.add_argument("--n_rollouts", type=int, default=25,
+    parser.add_argument("--n_rollouts", type=int, default=250,
                         help="Total rollouts for *each* PPO policy training")
     parser.add_argument("--n_envs", type=int, default=4, help="Number of parallel environments for PPO")
     parser.add_argument("--n_steps", type=int, default=2048,
@@ -309,7 +317,7 @@ if __name__ == "__main__":
 
     # --- SAC Hyperparameters ---
     parser.add_argument("--sac_learning_rate", type=float, default=3e-4, help="SAC learning rate")
-    parser.add_argument("--sac_buffer_size", type=int, default=300_000, help="SAC replay buffer size")  # 1_000_000
+    parser.add_argument("--sac_buffer_size", type=int, default=1_000_000, help="SAC replay buffer size")  # 1_000_000
     parser.add_argument("--sac_batch_size", type=int, default=256, help="SAC mini-batch size")
     parser.add_argument("--sac_gamma", type=float, default=0.99, help="SAC discount factor")
     parser.add_argument("--sac_tau", type=float, default=0.005, help="SAC soft update coefficient (polyak averaging)")

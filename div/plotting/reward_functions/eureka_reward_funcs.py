@@ -180,3 +180,107 @@ def custom_reward_fn_with_video(observation: torch.Tensor, action: torch.Tensor,
     }
 
     return reward, info
+
+
+def custom_reward_fn_without_video(observation: torch.Tensor, action: torch.Tensor, next_observation: torch.Tensor,
+                                   terminated: torch.Tensor, truncated: torch.Tensor) \
+                                   -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    device = observation.device
+
+    # Safeguard constants
+    zero = torch.tensor(0.0, device=device)
+    one = torch.tensor(1.0, device=device)
+
+    # ------------------------------------------------------------------
+    # Parse key observation components (valid for both 348 and 350 dims)
+    # ------------------------------------------------------------------
+    torso_z = observation[..., 0]    # scaled torso height-like variable
+    torso_vx = observation[..., 22]  # forward velocity (scaled)
+    torso_vz = observation[..., 24]  # vertical velocity (scaled)
+
+    # -----------------------------
+    # 1. Forward speed reward
+    # -----------------------------
+    # Scale velocity into a moderate range before tanh
+    speed_scale = torch.tensor(10.0, device=device)
+    vx_scaled = torso_vx / speed_scale
+    vx_scaled = vx_scaled.clamp(min=-5.0, max=5.0)
+
+    # Temperature for forward term
+    forward_temp = torch.tensor(1.0, device=device)
+    forward_term = torch.tanh(vx_scaled / forward_temp)  # in [-1, 1]
+
+    # -----------------------------
+    # 2. Upright / height reward
+    # -----------------------------
+    # Normalize height and reward being above a minimal "standing" threshold
+    height_scale = torch.tensor(50.0, device=device)
+    z_norm = (torso_z / height_scale).clamp(min=0.0, max=5.0)
+
+    # Minimal normalized height to be considered "upright-ish"
+    z_min = torch.tensor(0.5, device=device)  # corresponds to torso_z ~ 25.0
+    upright_base = (z_norm - z_min).clamp(min=0.0)
+
+    upright_temp = torch.tensor(1.0, device=device)
+    upright_term = torch.tanh(upright_base / upright_temp)  # in [0, 1) for z_norm > z_min
+
+    # -----------------------------
+    # 3. Effort penalty (energy)
+    # -----------------------------
+    # Sanitize actions to avoid NaNs/infs propagating
+    action_sanitized = torch.nan_to_num(action, nan=0.0, posinf=0.0, neginf=0.0)
+    # Also clamp to valid control range just in case
+    action_clamped = action_sanitized.clamp(min=-0.4, max=0.4)
+
+    act_sq = (action_clamped ** 2).sum(dim=-1)
+    ctrl_cost_coeff = torch.tensor(0.05, device=device)  # small cost
+    effort_penalty = ctrl_cost_coeff * act_sq  # typical range: [0, ~0.15]
+
+    # -----------------------------
+    # 4. Fall penalty
+    # -----------------------------
+    # Penalize termination events due to falls or other failures
+    # terminated is a tensor of 0/1 values
+    fall_scale = torch.tensor(1.0, device=device)
+    fall_penalty = fall_scale * terminated
+
+    # -----------------------------
+    # 5. Vertical smoothness penalty
+    # -----------------------------
+    # Penalize excessive vertical bouncing; keep small
+    vz_scale = torch.tensor(10.0, device=device)
+    vz_scaled = (torso_vz / vz_scale).clamp(min=-5.0, max=5.0)
+    smooth_coeff = torch.tensor(0.02, device=device)
+    smooth_penalty = smooth_coeff * (vz_scaled ** 2)
+
+    # -----------------------------
+    # Combine components
+    # -----------------------------
+    w_forward = torch.tensor(1.0, device=device)
+    w_upright = torch.tensor(0.5, device=device)
+
+    positive = w_forward * forward_term + w_upright * upright_term
+    negative = effort_penalty + fall_penalty + smooth_penalty
+
+    # Base reward (unbounded but moderate), then bounded replacement
+    base_reward = positive - negative
+
+    total_temp = torch.tensor(1.0, device=device)
+    total_reward = torch.tanh(base_reward / total_temp)  # final reward in (-1, 1)
+
+    # -----------------------------
+    # Info dict with components
+    # -----------------------------
+    info: Dict[str, torch.Tensor] = {}
+    info["forward_term"] = forward_term
+    info["upright_term"] = upright_term
+    info["effort_penalty"] = effort_penalty
+    info["fall_penalty"] = fall_penalty
+    info["smooth_penalty"] = smooth_penalty
+    info["positive_raw"] = positive
+    info["negative_raw"] = negative
+    info["base_reward"] = base_reward
+    info["torso_vx"] = torso_vx
+    info["torso_z"] = torso_z
+
+    return total_reward, info
