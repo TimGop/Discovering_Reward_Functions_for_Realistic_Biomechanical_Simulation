@@ -172,6 +172,7 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
         print("No episode stats list to plot.")
         return
 
+    max_fitness_scores = []
     for idx, episode_stats in enumerate(episode_stats_list):
         if not episode_stats:
             print(f"Warning: Empty stats for run {idx}")
@@ -183,6 +184,8 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
         if 'fitness_score' not in df.columns or 'l' not in df.columns:
             print(f"Warning: 'fitness_score' or 'l' missing in run {idx}. Skipping.")
             continue
+
+        max_fitness_scores.append(df['fitness_score'].max())
 
         # Calculate X-axis (Cumulative Steps)
         df['total_steps'] = df['l'].cumsum()
@@ -241,27 +244,32 @@ def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
 
     print(f"Raw fitness plot saved to: {save_path}")
 
+    return max_fitness_scores
+
 
 def main(args):
-    # base reward function
-    stats = []
-    for i in range(5):
-        stats.append(train_sac(args, name="base", run_no=i))
-    plot_raw_fitness_curve(stats, "plots", "base_reward")
-
     # eureka with video feedback reward function
+    print("eureka with video feedback reward function...")
     custom_reward_fn = custom_reward_fn_with_video
     stats = []
-    for i in range(5):
+    for i in range(10):
         stats.append(train_sac(args, name="eureka_with_vid", run_no=i, reward_func=custom_reward_fn))
-    plot_raw_fitness_curve(stats, "plots", "eureka_with_video_reward")
+    print(plot_raw_fitness_curve(stats, "plots", "eureka_with_video_reward"))
+
+    # base reward function
+    print("base reward function...")
+    stats = []
+    for i in range(10):
+        stats.append(train_sac(args, name="base", run_no=i))
+    print(plot_raw_fitness_curve(stats, "plots", "base_reward"))
 
     # eureka without video feedback reward function
+    print("eureka without video feedback reward function...")
     custom_reward_fn = custom_reward_fn_without_video
     stats = []
-    for i in range(5):
+    for i in range(10):
         stats.append(train_sac(args, name="eureka_without_vid", run_no=i, reward_func=custom_reward_fn))
-    plot_raw_fitness_curve(stats, "plots", "eureka_without_video_reward")
+    print(plot_raw_fitness_curve(stats, "plots", "eureka_without_video_reward"))
 
 
 if __name__ == "__main__":
