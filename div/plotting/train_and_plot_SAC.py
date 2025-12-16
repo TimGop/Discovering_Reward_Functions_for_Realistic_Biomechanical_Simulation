@@ -39,8 +39,7 @@ elif system_os == "Linux":
     os.environ["MUJOCO_GL"] = "egl"
 
 
-def train_sac(args, name,  run_no: int, reward_func=None):
-
+def train_sac(args, name, run_no: int, reward_func=None):
     # For every subprocess as well!
     if system_os == "Windows":
         # Windows: Do nothing.
@@ -166,116 +165,119 @@ def train_sac(args, name,  run_no: int, reward_func=None):
     return stats_callback.episode_stats
 
 
-def plot_raw_fitness_curve(episode_stats_list, save_dir, model_name):
-    dfs = []
-    if not episode_stats_list:
-        print("No episode stats list to plot.")
-        return
+def plot_combined_fitness_curves(experiments_dict, save_dir, plot_name="combined_fitness"):
+    plt.figure(figsize=(12, 7))
+    plt.style.use('ggplot')
 
-    max_fitness_scores = []
-    for idx, episode_stats in enumerate(episode_stats_list):
-        if not episode_stats:
-            print(f"Warning: Empty stats for run {idx}")
+    # each model gets a distinct color
+    colors = ['#1f77b4', '#e377c2', '#2ca02c', '#ff7f0e', '#9467bd']
+
+    all_max_scores = {}
+
+    for idx, (model_name, episode_stats_list) in enumerate(experiments_dict.items()):
+        dfs = []
+        max_fitness_scores = []
+        color = colors[idx % len(colors)]  # cycle through colors
+
+        if not episode_stats_list:
+            print(f"No stats for {model_name}")
             continue
 
-        df = pd.DataFrame(episode_stats)
+        for run_idx, episode_stats in enumerate(episode_stats_list):
+            if not episode_stats:
+                continue
 
-        # Validation
-        if 'fitness_score' not in df.columns or 'l' not in df.columns:
-            print(f"Warning: 'fitness_score' or 'l' missing in run {idx}. Skipping.")
+            df = pd.DataFrame(episode_stats)
+
+            if 'fitness_score' not in df.columns or 'l' not in df.columns:
+                continue
+
+            max_fitness_scores.append(df['fitness_score'].max())
+            df['total_steps'] = df['l'].cumsum()
+            dfs.append(df)
+
+        if not dfs:
+            print(f"No valid DataFrames for {model_name}")
             continue
 
-        max_fitness_scores.append(df['fitness_score'].max())
+        all_max_scores[model_name] = max_fitness_scores
 
-        # Calculate X-axis (Cumulative Steps)
-        df['total_steps'] = df['l'].cumsum()
-        dfs.append(df)
+        # interpolation & alignment
+        max_steps = max(df['total_steps'].iloc[-1] for df in dfs)
+        min_steps = min(df['total_steps'].iloc[0] for df in dfs)
 
-    if not dfs:
-        print("No valid DataFrames created.")
-        return
+        # create common grid for THIS model
+        common_x = np.linspace(min_steps, max_steps, num=200)
+        interpolated_y_values = []
 
-    # align Data (Interpolation)
+        for df in dfs:
+            y_interp = np.interp(common_x, df['total_steps'], df['fitness_score'])
+            interpolated_y_values.append(y_interp)
 
-    # Find the range of steps across all runs
-    max_steps = max(df['total_steps'].iloc[-1] for df in dfs)
-    min_steps = min(df['total_steps'].iloc[0] for df in dfs)
+        y_matrix = np.array(interpolated_y_values)
+        y_mean = np.mean(y_matrix, axis=0)
+        y_std = np.std(y_matrix, axis=0)
 
-    # Create a common grid of steps (e.g., 1000 points across the whole training duration)
-    common_x = np.linspace(min_steps, max_steps, num=100)
+        # plot the Mean Line
+        plt.plot(common_x, y_mean, color=color, linewidth=2, label=f"{model_name} (Mean)")
 
-    interpolated_y_values = []
+        # plot the Standard Deviation Shading
+        plt.fill_between(common_x, y_mean - y_std, y_mean + y_std,
+                         color=color, alpha=0.15, label=f"_nolegend_")  # _nolegend_ hides it from legend
 
-    for df in dfs:
-        y_interp = np.interp(common_x, df['total_steps'], df['fitness_score'])
-        interpolated_y_values.append(y_interp)
-
-    # Stack into a matrix (rows = runs, cols = common_x steps)
-    y_matrix = np.array(interpolated_y_values)
-
-    # Calculate Mean and Standard Deviation along the runs axis
-    y_mean = np.mean(y_matrix, axis=0)
-    y_std = np.std(y_matrix, axis=0)
-
-    plt.figure(figsize=(12, 6))
-    plt.style.use('ggplot')  # Optional: Makes it look nicer
-
-    plt.fill_between(common_x, y_mean - y_std, y_mean + y_std,
-                     color='#1f77b4', alpha=0.2, label='Standard Deviation')
-
-    plt.plot(common_x, y_mean, color='#1f77b4', linewidth=2, label='Mean Fitness')
-
-    # (Optional) Plot faint lines for individual runs to show raw noise
-    for y_run in interpolated_y_values:
-        plt.plot(common_x, y_run, color='gray', linewidth=0.5, alpha=0.15)
-
-    # Labels and Title
-    plt.title(f"Fitness Score Over Time (Aggregated): {model_name}")
+    # Finalize Figure Layout
+    plt.title("Fitness Score Comparison: Video Feedback vs Base")
     plt.xlabel("Number of Steps")
     plt.ylabel("Fitness Score")
     plt.legend(loc='upper left')
     plt.grid(True, which='both', linestyle='--', linewidth=0.5)
 
     os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"{plot_name}.png")
 
-    save_path = os.path.join(save_dir, f"{model_name}_raw_fitness.png")
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300)  # Increased DPI for better quality
     plt.close()
 
-    print(f"Raw fitness plot saved to: {save_path}")
-
-    return max_fitness_scores
+    print(f"Combined fitness plot saved to: {save_path}")
+    return all_max_scores
 
 
 def main(args):
-    # eureka with video feedback reward function
-    print("eureka with video feedback reward function...")
+    all_experiments = {}
+
+    # 1. Eureka WITH video feedback
+    print("Running: Eureka with video feedback...")
     custom_reward_fn = custom_reward_fn_with_video
-    stats = []
+    stats_vid = []
     for i in range(10):
-        stats.append(train_sac(args, name="eureka_with_vid", run_no=i, reward_func=custom_reward_fn))
-    print(plot_raw_fitness_curve(stats, "plots", "eureka_with_video_reward"))
+        stats_vid.append(train_sac(args, name="eureka_with_vid", run_no=i, reward_func=custom_reward_fn))
 
-    # base reward function
-    print("base reward function...")
-    stats = []
+    all_experiments["Eureka (With Video)"] = stats_vid
+
+    # 2. Base reward function
+    print("Running: Base reward function...")
+    stats_base = []
     for i in range(10):
-        stats.append(train_sac(args, name="base", run_no=i))
-    print(plot_raw_fitness_curve(stats, "plots", "base_reward"))
+        stats_base.append(train_sac(args, name="base", run_no=i))
 
-    # eureka without video feedback reward function
-    print("eureka without video feedback reward function...")
+    all_experiments["Base Reward"] = stats_base
+
+    # 3. Eureka WITHOUT video feedback
+    print("Running: Eureka without video feedback...")
     custom_reward_fn = custom_reward_fn_without_video
-    stats = []
+    stats_no_vid = []
     for i in range(10):
-        stats.append(train_sac(args, name="eureka_without_vid", run_no=i, reward_func=custom_reward_fn))
-    print(plot_raw_fitness_curve(stats, "plots", "eureka_without_video_reward"))
+        stats_no_vid.append(train_sac(args, name="eureka_without_vid", run_no=i, reward_func=custom_reward_fn))
+
+    all_experiments["Eureka (No Video)"] = stats_no_vid
+
+    print("Generating combined plot...")
+    print(plot_combined_fitness_curves(all_experiments, "plots", "comparison_fitness_curve"))
 
 
 if __name__ == "__main__":
-    # change replay buffer size on server!!!!!!!!!!!!!!!
     print("training for plotting and videos started...")
-    parser = argparse.ArgumentParser(description="Evolve reward functions using PPO or SAC and GPT.")
+    parser = argparse.ArgumentParser(description="Testing and plotting args match eureka script")
 
     parser.add_argument("--rl_algorithm", type=str, default="SAC", help="rl algorithm to use for training",
                         choices=["PPO", "SAC"])
@@ -287,13 +289,6 @@ if __name__ == "__main__":
     parser.add_argument("--env_id", type=str, default="Humanoid-v5", help="Gymnasium environment ID",
                         choices=["Walker2d-v5", "Humanoid-v5"])
     parser.add_argument("--num_iterations", type=int, default=5, help="Number of reward evolution iterations")
-    parser.add_argument("--gpt_model", type=str, default="gpt-5.1",
-                        choices=["gpt-4", "gpt-4-turbo", "gpt-5-nano-2025-08-07", "gpt-5", "gpt-5.1"],
-                        help="GPT model name for ChatSession")
-    parser.add_argument("--num_funcs_per_iteration", type=int, default=16,
-                        help="Number of reward functions to generate per iteration")
-    parser.add_argument("--video_feedback", type=bool, default=False,
-                        help="have video feedback to incentivize human-like movement")
 
     # --- RL Training Parameters ---
     # steps per rl agent rollout is n_envs * n_steps and therefore total steps is n_rollouts * n_envs * n_steps
@@ -343,10 +338,6 @@ if __name__ == "__main__":
     parser.add_argument("--vec_env_norm_reward", type=bool, default=False, help="normalize rewards in env")
     parser.add_argument("--vec_env_clip_obs", type=float, default=10.0, help="observation clipping param")
     parser.add_argument("--vec_env_seed", type=int, default=0, help="initial random seed for env")
-
-    # --- Multiprocessing parameters ---
-    parser.add_argument("--num_parallel_trains", type=int, default=2,
-                        help="Number of PPO training processes to run in parallel.")
 
     parsed_args = parser.parse_args()
     main(parsed_args)
