@@ -165,6 +165,7 @@ def get_reflection(training_results, messages, epoch_freq, args, eureka_iteratio
     max_fitness = float("-inf")
     for idx, result in enumerate(training_results):
         curr_max_fitness = result["score"]["max"]
+        print("\n\n" + "max fitness for policy with index" + str(idx) + ": " + str(curr_max_fitness) + "\n\n")
         if curr_max_fitness > max_fitness:
             max_fitness = curr_max_fitness
             best_index = idx
