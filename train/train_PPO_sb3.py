@@ -8,6 +8,7 @@ import time
 import functools
 from utils.Callbacks.Callbacks_sb3 import AutoRecordStatsCallback
 from utils.utils import create_custom_reward_env, process_callback_stats
+
 # for recording
 system_os = platform.system()  # Returns 'Windows', 'Linux', or 'Darwin' (Mac)
 
@@ -24,6 +25,7 @@ elif system_os == "Linux":
         os.environ["MUJOCO_GL"] = "egl"
     else:
         print("Detected Linux with Display: Using default backend.")
+
 
 def train_ppo(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
     ENV_ID = args.env_id
@@ -65,7 +67,7 @@ def train_ppo(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
         ent_coef=args.ppo_ent_coef,
         vf_coef=args.ppo_vf_coef,
         max_grad_norm=args.ppo_max_grad_norm,
-        device='cpu'   # sb3 ppo made to train on cpu (actually faster)
+        device='cpu'  # sb3 ppo made to train on cpu (actually faster)
     )
 
     def eval_env_creator():

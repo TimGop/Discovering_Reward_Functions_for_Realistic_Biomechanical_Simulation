@@ -184,12 +184,7 @@ class CustomMultiPolicyWalker(MultiAgentEnv):
 
 def compile_func_from_string(
         code_string: str) -> Callable:
-    """
-    Compiles a function from a string.
-    Finds the expected 'custom_reward_fn', creates a temporary .py file,
-    imports it, and returns the function object.
-    """
-    # Find the expected function name
+    # find the expected function name
     name_pattern = re.compile(r"def\s+([a-zA-Z_]\w*)")
     match = name_pattern.search(code_string)
     if not match:
@@ -198,7 +193,6 @@ def compile_func_from_string(
     function_name = match.group(1)
 
     # Validate that the *first* function found is the one we expect.
-    # This is a reasonable assumption for these code blocks.
     if function_name != EXPECTED_NAME:
         raise ValueError(f"Function name is incorrect. Expected: '{EXPECTED_NAME}', Got: '{function_name}'")
 
@@ -206,7 +200,7 @@ def compile_func_from_string(
     module_name = None
 
     try:
-        # Using delete=False is crucial for compatibility, especially on Windows
+        # delete=False is crucial for compatibility, especially on Windows
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.py', delete=False) as tmp:
             tmp_path = Path(tmp.name)
             tmp.write(code_string)
@@ -220,10 +214,10 @@ def compile_func_from_string(
             imported_module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = imported_module
 
-            # This executes the code, including imports and decorators
+            # executes the code, including imports and decorators
             spec.loader.exec_module(imported_module)
 
-            # Get the specific function we're looking for
+            # get the specific function we're looking for
             if not hasattr(imported_module, function_name):
                 raise AttributeError(f"Module was imported but does not have function '{function_name}'.")
 

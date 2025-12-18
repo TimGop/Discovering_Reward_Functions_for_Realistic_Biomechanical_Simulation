@@ -74,7 +74,6 @@ def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
     vec_env = make_vec_env(custom_reward_creation_func, n_envs=N_ENVS, seed=args.vec_env_seed)
 
     print(f"[{p_id}] normalizing the environment...")
-    # Note: SAC often works well without normalization, but we keep it to match ppo workflow
     vec_env = VecNormalize(vec_env, norm_obs=args.vec_env_norm_obs, norm_reward=args.vec_env_norm_reward,
                            clip_obs=args.vec_env_clip_obs)
 
@@ -88,7 +87,6 @@ def train_sac(p_id, reward_func, args, stat_frequency: int, eureka_it: int):
 
     print(f"[{p_id}] defining the sbx SAC model...")
 
-    # Using the hyperparameters from your reference script
     model = SAC(
         policy="MlpPolicy",
         env=vec_env,
@@ -168,12 +166,6 @@ def train_sbx_parallel_policies_SAC(reward_funcs, args, stat_frequency: int, eur
     Trains multiple SAC policies in parallel using multiprocessing.
     """
     num_workers = args.num_parallel_trains
-
-    # IMPORTANT: When running JAX (sbx) in multiprocessing on a single GPU,
-    # JAX will try to allocate ~80-90% of VRAM for the first process, causing OOM error for others.
-    # need to set the following environment variables before running this script (at top of script!):
-    # os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-    # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{1/num_workers:.2f}"
 
     tasks = []
     for idx, reward_func in enumerate(reward_funcs):

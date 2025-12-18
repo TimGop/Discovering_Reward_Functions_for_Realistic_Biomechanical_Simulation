@@ -52,7 +52,7 @@ def reward_evolution(alg_args):
                         training_results = train_sbx_parallel_policies_SAC(reward_funcs=reward_funcs, args=alg_args,
                                                                            stat_frequency=epoch_stat_freq,
                                                                            eureka_it=iteration)
-                else:  # using rllib library (PPO) --> Note: no video reward reflection
+                else:  # using rllib library (PPO) --> Note: no video reward reflection implemented for ray variant
                     training_results = train_rllib_multi_policy(reward_list=reward_funcs, hidden_layers=[64, 64],
                                                                 env_id=alg_args.env_id, stat_frequency=300,
                                                                 max_iterations=3_000)
